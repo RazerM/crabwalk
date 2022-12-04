@@ -35,6 +35,7 @@ enum State {
     Closed,
 }
 
+/// Walk is a recursive directory iterator over file paths in one or more directories.
 #[pyclass(
     module = "crabwalk",
     text_signature = "(\
@@ -176,6 +177,8 @@ impl Walk {
         Ok(instance)
     }
 
+    /// Disable the `hidden`, `parents`, `ignore`, `git_ignore`, `git_global`, and `git_exclude`
+    /// filters.
     fn disable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.hidden = false;
@@ -187,6 +190,8 @@ impl Walk {
         Ok(())
     }
 
+    /// Enable the `hidden`, `parents`, `ignore`, `git_ignore`, `git_global`, and `git_exclude`
+    /// filters.
     fn enable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.hidden = true;

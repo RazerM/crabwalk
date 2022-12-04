@@ -12,6 +12,13 @@ authors = [
     { name = "Frazer McLean", email = "frazer@frazermclean.co.uk" }
 ]
 
+[project.optional-dependencies]
+docs = [
+    "furo",
+    "myst-parser",
+    "sphinx",
+]
+
 [tool.isort]
 profile = "black"
 known_first_party = ["crabwalk"]
