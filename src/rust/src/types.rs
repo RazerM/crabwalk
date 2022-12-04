@@ -38,23 +38,19 @@ impl Types {
         }
     }
 
-    pub fn __getitem__<'py>(&'py self, py: Python<'py>, name: &PyAny) -> PyResult<&PyTuple> {
+    pub fn __getitem__(&self, py: Python<'_>, name: &PyAny) -> PyResult<Py<PyTuple>> {
         let types: &PyAny = self.types.as_ref().unwrap().as_ref(py);
-        types
+        Ok(types
             .get_item(name)?
             .downcast::<PyList>()?
             .as_sequence()
-            .tuple()
+            .tuple()?
+            .into())
     }
 
     #[args(key, default = "None", "/")]
     #[pyo3(text_signature = "(key, default=None, /)")]
-    pub fn get<'py>(
-        &'py self,
-        py: Python<'py>,
-        key: &PyAny,
-        default: Option<&'py PyAny>,
-    ) -> PyResult<PyObject> {
+    pub fn get(&self, py: Python<'_>, key: &PyAny, default: Option<&PyAny>) -> PyResult<PyObject> {
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs.to_object(py)),
             Err(err) if err.is_instance(py, py.get_type::<PyKeyError>()) => {
@@ -72,24 +68,28 @@ impl Types {
         }
     }
 
-    pub fn keys<'py>(self_: PyRef<'py, Self>, py: Python<'py>) -> PyResult<&'py PyAny> {
-        KEYS_VIEW_TYPE.get(py).unwrap().as_ref(py).call1((self_,))
+    pub fn keys(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<PyObject> {
+        KEYS_VIEW_TYPE
+            .get(py)
+            .unwrap()
+            .call1(py, (self_,))
+            .map(Into::into)
     }
 
-    pub fn items<'py>(self_: PyRef<'py, Self>, py: Python<'py>) -> PyResult<&'py PyAny> {
+    pub fn items(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<PyObject> {
         ITEMS_VIEW_TYPE
             .get(py)
             .unwrap()
-            .as_ref(py)
-            .call1((self_,))
+            .call1(py, (self_,))
+            .map(Into::into)
     }
 
-    pub fn values<'py>(self_: PyRef<'py, Self>, py: Python<'py>) -> PyResult<&'py PyAny> {
+    pub fn values(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<PyObject> {
         VALUES_VIEW_TYPE
             .get(py)
             .unwrap()
-            .as_ref(py)
-            .call1((self_,))
+            .call1(py, (self_,))
+            .map(Into::into)
     }
 
     pub fn __richcmp__(
@@ -141,8 +141,8 @@ impl Types {
         self.types.as_ref().unwrap().as_ref(py).len()
     }
 
-    pub fn __iter__<'py>(&'py self, py: Python<'py>) -> PyResult<&PyIterator> {
-        PyIterator::from_object(py, self.types.as_ref().unwrap().as_ref(py))
+    pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        PyIterator::from_object(py, self.types.as_ref().unwrap().as_ref(py)).map(Into::into)
     }
 
     pub fn __delitem__(&self, py: Python<'_>, name: &PyAny) -> PyResult<()> {
@@ -161,11 +161,11 @@ impl Types {
     // #[pyo3(text_signature = "(key, default=<missing>, /)")]
     #[args(key, "/", default = "Maybe::Missing")]
     #[pyo3(text_signature = "(key, /, default=<missing>)")]
-    pub fn pop<'py>(
-        &'py self,
-        py: Python<'py>,
+    pub fn pop(
+        &self,
+        py: Python<'_>,
         key: &PyAny,
-        default: Maybe<&'py PyAny>,
+        default: Maybe<&PyAny>,
     ) -> PyResult<PyObject> {
         match self.__getitem__(py, key) {
             Ok(globs) => {
@@ -181,7 +181,7 @@ impl Types {
     }
 
     #[pyo3(text_signature = "()")]
-    pub fn popitem<'py>(&'py self, py: Python<'py>) -> PyResult<(&PyString, &PyTuple)> {
+    pub fn popitem(&self, py: Python<'_>) -> PyResult<(Py<PyString>, Py<PyTuple>)> {
         let (name, globs): (&PyString, &PyList) = self
             .types
             .as_ref()
@@ -189,7 +189,7 @@ impl Types {
             .as_ref(py)
             .call_method0("popitem")?
             .extract()?;
-        Ok((name, globs.as_sequence().tuple()?))
+        Ok((name.into(), globs.as_sequence().tuple()?.into()))
     }
 
     #[pyo3(text_signature = "()")]
@@ -232,18 +232,18 @@ impl Types {
 
     #[args(key, default = "None", "/")]
     #[pyo3(text_signature = "(key, default=(), /)")]
-    pub fn setdefault<'py>(
-        &'py self,
-        py: Python<'py>,
+    pub fn setdefault(
+        &self,
+        py: Python<'_>,
         key: &PyAny,
-        default: Option<&'py PyAny>,
-    ) -> PyResult<&PyTuple> {
+        default: Option<&PyAny>,
+    ) -> PyResult<Py<PyTuple>> {
         let default: &PySequence = default.unwrap_or_else(|| PyTuple::empty(py)).downcast()?;
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs),
             Err(err) if err.is_instance(py, py.get_type::<PyKeyError>()) => {
                 self.__setitem__(py, key.extract()?, default)?;
-                Ok(default.tuple()?)
+                Ok(default.tuple()?.into())
             }
             Err(err) => Err(err),
         }

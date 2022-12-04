@@ -199,8 +199,8 @@ impl Walk {
     }
 
     #[getter]
-    fn paths<'py>(&'py self, py: Python<'py>) -> &'py PyList {
-        self.paths.as_ref().unwrap().as_ref(py)
+    fn paths(&self) -> Py<PyList> {
+        self.paths.clone().unwrap()
     }
 
     #[getter]
@@ -240,17 +240,17 @@ impl Walk {
     }
 
     #[getter]
-    fn global_ignore_files<'py>(&'py self, py: Python<'py>) -> &'py PyList {
-        self.global_ignore_files.as_ref().unwrap().as_ref(py)
+    fn global_ignore_files(&self) -> Py<PyList> {
+        self.global_ignore_files.clone().unwrap()
     }
 
     #[getter]
-    fn custom_ignore_filenames<'py>(&'py self, py: Python<'py>) -> &'py PyList {
-        self.custom_ignore_filenames.as_ref().unwrap().as_ref(py)
+    fn custom_ignore_filenames(&self) -> Py<PyList> {
+        self.custom_ignore_filenames.clone().unwrap()
     }
 
     #[getter]
-    fn overrides<'py>(&'py self, py: Python<'py>) -> PyObject {
+    fn overrides(&self, py: Python<'_>) -> PyObject {
         self.overrides.to_object(py)
     }
 
@@ -273,7 +273,7 @@ impl Walk {
     }
 
     #[getter]
-    fn types<'py>(&'py self, py: Python<'py>) -> PyObject {
+    fn types(&self, py: Python<'_>) -> PyObject {
         self.types.to_object(py)
     }
 
@@ -680,10 +680,10 @@ impl Walk {
         if let Some(types) = &self.types {
             let types = types.borrow(py);
             let mut types_builder = TypesBuilder::new();
-            for name in types.__iter__(py)? {
+            for name in types.__iter__(py)?.as_ref(py) {
                 let name = name?;
                 let globs = types.__getitem__(py, name)?;
-                for glob in globs.extract::<Vec<&str>>()? {
+                for glob in globs.extract::<Vec<&str>>(py)? {
                     types_builder
                         .add(name.extract()?, glob)
                         .map_err(|err| err.into_py_err(py))?;
