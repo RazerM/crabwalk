@@ -1,0 +1,2 @@
+include src/crabwalk/py.typed
+recursive-include src *.pyi

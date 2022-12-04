@@ -1,0 +1,21 @@
+[package]
+name = "crabwalk-rust"
+version = "0.1.0"
+authors = ["Frazer McLean <frazer@frazermclean.co.uk>"]
+edition = "2018"
+publish = false
+rust-version = "1.48"
+
+[dependencies]
+ignore = "0.4"
+lazy_static = "1.1"
+pyo3 = { version = "0.17.2" }
+regex = "1.1"
+
+[features]
+extension-module = ["pyo3/extension-module"]
+default = ["extension-module"]
+
+[lib]
+name = "crabwalk_rust"
+crate-type = ["cdylib"]
