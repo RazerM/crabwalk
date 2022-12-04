@@ -160,7 +160,7 @@ class Overrides(MutableSequence[OverrideT]):
         self, index: Union[int, slice], value: Union[OverrideT, Iterable[OverrideT]]
     ) -> None:
         if isinstance(index, slice):
-            self._overrides[index] = (coerce_override(value) for o in value)
+            self._overrides[index] = (coerce_override(o) for o in value)
         else:
             self._overrides[index] = coerce_override(value)
 
