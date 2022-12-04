@@ -93,7 +93,7 @@ impl IntoPyErr for ignore::Error {
                 };
                 let kwargs = [("name", name)];
                 match unrecognized_file_type.call((), Some(kwargs.into_py_dict(py))) {
-                    Err(err) => return err,
+                    Err(err) => err,
                     Ok(err) => PyErr::from_value(err),
                 }
             }

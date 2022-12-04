@@ -1,4 +1,3 @@
-use ignore;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
@@ -41,11 +40,11 @@ impl Types {
 
     pub fn __getitem__<'py>(&'py self, py: Python<'py>, name: &PyAny) -> PyResult<&PyTuple> {
         let types: &PyAny = self.types.as_ref().unwrap().as_ref(py);
-        Ok(types
+        types
             .get_item(name)?
             .downcast::<PyList>()?
             .as_sequence()
-            .tuple()?)
+            .tuple()
     }
 
     #[args(key, default = "None", "/")]
@@ -74,23 +73,23 @@ impl Types {
     }
 
     pub fn keys<'py>(self_: PyRef<'py, Self>, py: Python<'py>) -> PyResult<&'py PyAny> {
-        Ok(KEYS_VIEW_TYPE.get(py).unwrap().as_ref(py).call1((self_,))?)
+        KEYS_VIEW_TYPE.get(py).unwrap().as_ref(py).call1((self_,))
     }
 
     pub fn items<'py>(self_: PyRef<'py, Self>, py: Python<'py>) -> PyResult<&'py PyAny> {
-        Ok(ITEMS_VIEW_TYPE
+        ITEMS_VIEW_TYPE
             .get(py)
             .unwrap()
             .as_ref(py)
-            .call1((self_,))?)
+            .call1((self_,))
     }
 
     pub fn values<'py>(self_: PyRef<'py, Self>, py: Python<'py>) -> PyResult<&'py PyAny> {
-        Ok(VALUES_VIEW_TYPE
+        VALUES_VIEW_TYPE
             .get(py)
             .unwrap()
             .as_ref(py)
-            .call1((self_,))?)
+            .call1((self_,))
     }
 
     pub fn __richcmp__(

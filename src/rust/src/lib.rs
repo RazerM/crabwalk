@@ -5,7 +5,6 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::ptr;
 
-use ignore;
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyTypeError};
@@ -113,6 +112,7 @@ impl Walk {
         filter_entry = "None",
         onerror = "None"
     )]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
         paths: &PyTuple,
@@ -692,10 +692,10 @@ impl Walk {
             for selection in &types.selections {
                 match selection {
                     Selection::Select(name) => {
-                        types_builder.select(&name);
+                        types_builder.select(name);
                     }
                     Selection::Negate(name) => {
-                        types_builder.negate(&name);
+                        types_builder.negate(name);
                     }
                 }
             }
