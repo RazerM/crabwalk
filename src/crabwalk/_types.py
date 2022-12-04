@@ -119,7 +119,10 @@ class Overrides(MutableSequence[OverrideT]):
     _overrides: List[Override]
 
     def __init__(
-        self, overrides: Iterable[OverrideT] = (), *, path: "Union[str, os.PathLike[str]]"
+        self,
+        overrides: Iterable[OverrideT] = (),
+        *,
+        path: "Union[str, os.PathLike[str]]",
     ) -> None:
         path = os.fspath(path)
         if not isinstance(path, str):
@@ -182,8 +185,7 @@ class Overrides(MutableSequence[OverrideT]):
         return iter(self._overrides)
 
     def __reversed__(self) -> Iterator[Override]:
-        for override in reversed(self._overrides):
-            yield override
+        yield from reversed(self._overrides)
 
     def pop(self, index: int = -1) -> Override:
         return self._overrides.pop(index)

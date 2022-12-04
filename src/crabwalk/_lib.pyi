@@ -1,11 +1,5 @@
 import os
-from collections.abc import (
-    Callable,
-    Iterable,
-    Iterator,
-    MutableMapping,
-    Sequence,
-)
+from collections.abc import Callable, Iterable, Iterator, MutableMapping, Sequence
 from types import TracebackType
 from typing import Any, Protocol, TypeVar, overload
 
