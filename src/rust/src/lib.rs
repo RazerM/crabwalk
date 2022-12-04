@@ -12,7 +12,7 @@ use pyo3::exceptions::{PyException, PyRuntimeError, PyTypeError};
 use pyo3::once_cell::GILOnceCell;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PySequence, PyString, PyTraceback, PyTuple, PyType};
-use pyo3::{ffi, AsPyPointer, PyTypeInfo};
+use pyo3::{ffi, AsPyPointer, PyTraverseError, PyTypeInfo, PyVisit};
 
 use crate::direntry::DirEntry;
 use crate::error::IntoPyErr;
@@ -64,12 +64,12 @@ onerror=None, \
 )]
 pub struct Walk {
     state: State,
-    paths: Py<PyList>,
+    paths: Option<Py<PyList>>, // Only None after tp_clear
     max_depth: Option<usize>,
     follow_links: bool,
     max_filesize: Option<u64>,
-    global_ignore_files: Py<PyList>,
-    custom_ignore_filenames: Py<PyList>,
+    global_ignore_files: Option<Py<PyList>>, // Only None after tp_clear
+    custom_ignore_filenames: Option<Py<PyList>>, // Only None after tp_clear
     overrides: Option<PyObject>,
     types: Option<Py<Types>>,
     hidden: bool,
@@ -80,11 +80,11 @@ pub struct Walk {
     git_exclude: bool,
     require_git: bool,
     ignore_case_insensitive: bool,
-    sort_key: PyObject,
+    sort_key: Option<PyObject>,
     same_file_system: bool,
     skip_stdout: bool,
-    filter_entry: PyObject,
-    onerror: PyObject,
+    filter_entry: Option<PyObject>,
+    onerror: Option<PyObject>,
 }
 
 #[pymethods]
@@ -139,16 +139,16 @@ impl Walk {
     ) -> PyResult<Self> {
         let paths = PyList::new(py, paths);
         let global_ignore_files = match global_ignore_files {
-            Some(seq) => seq.list()?.into_py(py),
-            None => PyList::empty(py).into_py(py),
+            Some(seq) => Some(seq.list()?.into_py(py)),
+            None => Some(PyList::empty(py).into_py(py)),
         };
         let custom_ignore_filenames = match custom_ignore_filenames {
-            Some(seq) => seq.list()?.into_py(py),
-            None => PyList::empty(py).into_py(py),
+            Some(seq) => Some(seq.list()?.into_py(py)),
+            None => Some(PyList::empty(py).into_py(py)),
         };
         let mut instance = Self {
             state: State::Unopened,
-            paths: paths.into_py(py),
+            paths: Some(paths.into_py(py)),
             max_depth,
             follow_links,
             max_filesize,
@@ -164,14 +164,14 @@ impl Walk {
             git_exclude,
             require_git,
             ignore_case_insensitive,
-            sort_key: sort_key.into_py(py),
+            sort_key: sort_key.map(|s| s.into_py(py)),
             same_file_system,
             skip_stdout,
-            filter_entry: filter_entry.into_py(py),
-            onerror: onerror.into_py(py),
+            filter_entry: filter_entry.map(|f| f.into_py(py)),
+            onerror: Some(onerror.into_py(py)),
         };
         if let Some(overrides) = overrides {
-            instance.set_overrides(py, overrides.as_ref(py))?;
+            instance.set_overrides(py, Some(overrides.as_ref(py)))?;
         }
         Ok(instance)
     }
@@ -200,7 +200,7 @@ impl Walk {
 
     #[getter]
     fn paths<'py>(&'py self, py: Python<'py>) -> &'py PyList {
-        self.paths.as_ref(py)
+        self.paths.as_ref().unwrap().as_ref(py)
     }
 
     #[getter]
@@ -241,12 +241,12 @@ impl Walk {
 
     #[getter]
     fn global_ignore_files<'py>(&'py self, py: Python<'py>) -> &'py PyList {
-        self.global_ignore_files.as_ref(py)
+        self.global_ignore_files.as_ref().unwrap().as_ref(py)
     }
 
     #[getter]
     fn custom_ignore_filenames<'py>(&'py self, py: Python<'py>) -> &'py PyList {
-        self.custom_ignore_filenames.as_ref(py)
+        self.custom_ignore_filenames.as_ref().unwrap().as_ref(py)
     }
 
     #[getter]
@@ -255,18 +255,20 @@ impl Walk {
     }
 
     #[setter]
-    fn set_overrides(&mut self, py: Python<'_>, overrides: &PyAny) -> PyResult<()> {
+    fn set_overrides(&mut self, py: Python<'_>, overrides: Option<&PyAny>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        if !overrides.is_none() {
-            let types_mod = TYPES_MODULE.get(py).unwrap().as_ref(py);
-            let overrides_type = types_mod.getattr("Overrides").unwrap().extract()?;
-            if !overrides.is_instance(overrides_type)? {
-                return Err(PyTypeError::new_err(
-                    "overrides must be an Overrides instance",
-                ));
-            }
-        }
-        self.overrides = Some(overrides.into_py(py));
+        self.overrides = overrides
+            .map(|overrides| {
+                let types_mod = TYPES_MODULE.get(py).unwrap().as_ref(py);
+                let overrides_type = types_mod.getattr("Overrides").unwrap().extract()?;
+                if !overrides.is_instance(overrides_type)? {
+                    return Err(PyTypeError::new_err(
+                        "overrides must be an Overrides instance",
+                    ));
+                }
+                Ok(overrides.into_py(py))
+            })
+            .transpose()?;
         Ok(())
     }
 
@@ -379,12 +381,12 @@ impl Walk {
     }
 
     #[getter]
-    fn sort_key<'py>(&'py self, py: Python<'py>) -> &'py PyAny {
-        self.sort_key.as_ref(py)
+    fn sort_key(&self) -> Option<PyObject> {
+        self.sort_key.clone()
     }
 
     #[setter]
-    fn set_sort_key(&mut self, value: PyObject) -> PyResult<()> {
+    fn set_sort_key(&mut self, value: Option<PyObject>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.sort_key = value;
         Ok(())
@@ -415,24 +417,24 @@ impl Walk {
     }
 
     #[getter]
-    fn filter_entry<'py>(&'py self, py: Python<'py>) -> &'py PyAny {
-        self.filter_entry.as_ref(py)
+    fn filter_entry(&self) -> Option<PyObject> {
+        self.filter_entry.clone()
     }
 
     #[setter]
-    fn set_filter_entry(&mut self, value: PyObject) -> PyResult<()> {
+    fn set_filter_entry(&mut self, value: Option<PyObject>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.filter_entry = value;
         Ok(())
     }
 
     #[getter]
-    fn onerror<'py>(&'py self, py: Python<'py>) -> &'py PyAny {
-        self.onerror.as_ref(py)
+    fn onerror(&self) -> Option<PyObject> {
+        self.onerror.clone()
     }
 
     #[setter]
-    fn set_onerror(&mut self, value: PyObject) -> PyResult<()> {
+    fn set_onerror(&mut self, value: Option<PyObject>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.onerror = value;
         Ok(())
@@ -495,11 +497,52 @@ impl Walk {
                     return Ok(Some(DirEntry::new(dent)));
                 }
                 Err(err) => {
-                    convert_and_call_onerror(py, self.onerror.as_ref(py), err)?;
+                    if let Some(onerror) = self.onerror.clone() {
+                        convert_and_call_onerror(py, onerror.as_ref(py), err)?;
+                    }
                 }
             }
         }
         Ok(None)
+    }
+
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        if let Some(paths) = &self.paths {
+            visit.call(paths)?;
+        }
+        if let Some(global_ignore_files) = &self.global_ignore_files {
+            visit.call(global_ignore_files)?;
+        }
+        if let Some(custom_ignore_filenames) = &self.custom_ignore_filenames {
+            visit.call(custom_ignore_filenames)?;
+        }
+        if let Some(overrides) = &self.overrides {
+            visit.call(overrides)?;
+        }
+        if let Some(types) = &self.types {
+            visit.call(types)?;
+        }
+        if let Some(sort_key) = &self.sort_key {
+            visit.call(sort_key)?;
+        }
+        if let Some(filter_entry) = &self.filter_entry {
+            visit.call(filter_entry)?;
+        }
+        if let Some(onerror) = &self.onerror {
+            visit.call(onerror)?;
+        }
+        Ok(())
+    }
+
+    fn __clear__(&mut self) {
+        self.paths = None;
+        self.global_ignore_files = None;
+        self.custom_ignore_filenames = None;
+        self.overrides = None;
+        self.types = None;
+        self.sort_key = None;
+        self.filter_entry = None;
+        self.onerror = None;
     }
 }
 
@@ -514,7 +557,7 @@ impl Walk {
     }
 
     fn build(&mut self, py: Python<'_>) -> PyResult<ignore::Walk> {
-        let paths = self.paths.as_ref(py);
+        let paths = self.paths.as_ref().unwrap().as_ref(py);
         if paths.is_empty() {
             return Err(PyTypeError::new_err("Must specify at least one path"));
         }
@@ -553,18 +596,17 @@ impl Walk {
             .same_file_system(self.same_file_system)
             .skip_stdout(self.skip_stdout);
 
-        for path in fspath_list(self.global_ignore_files.as_ref(py))? {
+        for path in fspath_list(self.global_ignore_files.as_ref().unwrap().as_ref(py))? {
             if let Some(err) = builder.add_ignore(path) {
                 self.convert_and_call_onerror(py, err)?;
             }
         }
 
-        for path in fspath_list(self.custom_ignore_filenames.as_ref(py))? {
+        for path in fspath_list(self.custom_ignore_filenames.as_ref().unwrap().as_ref(py))? {
             builder.add_custom_ignore_filename(path);
         }
 
-        if !self.filter_entry.is_none(py) {
-            let filter_entry = self.filter_entry.clone_ref(py);
+        if let Some(filter_entry) = self.filter_entry.clone() {
             builder.filter_entry(move |dent| {
                 let py_dent = DirEntry::new(dent.clone());
                 Python::with_gil(|py| {
@@ -584,8 +626,7 @@ impl Walk {
             });
         }
 
-        if !self.sort_key.is_none(py) {
-            let sort_key = self.sort_key.clone_ref(py);
+        if let Some(sort_key) = self.sort_key.clone() {
             builder.sort_by_file_path(move |a, b| {
                 fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
                     Python::with_gil(|py| {
@@ -615,27 +656,25 @@ impl Walk {
             });
         }
 
-        if let Some(overrides) = &self.overrides {
+        if let Some(overrides) = self.overrides.clone() {
             let overrides = overrides.as_ref(py);
-            if !overrides.is_none() {
-                let path: OsString = fspath(overrides.getattr("path")?)?.extract()?;
-                let mut overrides_builder = OverrideBuilder::new(path);
-                for override_ in overrides.iter()? {
-                    let override_ = override_?;
-                    let glob = override_.get_item(0)?.extract()?;
-                    let case_insensitive = override_.get_item(1)?.extract()?;
-                    overrides_builder
-                        .case_insensitive(case_insensitive)
-                        .map_err(|err| err.into_py_err(py))?;
-                    overrides_builder
-                        .add(glob)
-                        .map_err(|err| err.into_py_err(py))?;
-                }
-                let overrides = overrides_builder
-                    .build()
+            let path: OsString = fspath(overrides.getattr("path")?)?.extract()?;
+            let mut overrides_builder = OverrideBuilder::new(path);
+            for override_ in overrides.iter()? {
+                let override_ = override_?;
+                let glob = override_.get_item(0)?.extract()?;
+                let case_insensitive = override_.get_item(1)?.extract()?;
+                overrides_builder
+                    .case_insensitive(case_insensitive)
                     .map_err(|err| err.into_py_err(py))?;
-                builder.overrides(overrides);
+                overrides_builder
+                    .add(glob)
+                    .map_err(|err| err.into_py_err(py))?;
             }
+            let overrides = overrides_builder
+                .build()
+                .map_err(|err| err.into_py_err(py))?;
+            builder.overrides(overrides);
         }
 
         if let Some(types) = &self.types {
@@ -680,7 +719,10 @@ impl Walk {
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {
-        convert_and_call_onerror(py, self.onerror.as_ref(py), err)
+        if let Some(onerror) = self.onerror.clone() {
+            convert_and_call_onerror(py, onerror.as_ref(py), err)?;
+        }
+        Ok(())
     }
 }
 
@@ -713,10 +755,7 @@ impl Drop for Walk {
 }
 
 fn convert_and_call_onerror(py: Python<'_>, onerror: &PyAny, err: ignore::Error) -> PyResult<()> {
-    if !onerror.is_none() {
-        onerror.call1((err.into_py_err(py),))?;
-    }
-    Ok(())
+    onerror.call1((err.into_py_err(py),)).map(|_| ())
 }
 
 #[pymodule]
