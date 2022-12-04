@@ -278,7 +278,7 @@ impl Walk {
     }
 
     #[setter]
-    fn set_typepes(&mut self, types: Option<Py<Types>>) -> PyResult<()> {
+    fn set_types(&mut self, types: Option<Py<Types>>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.types = types;
         Ok(())
