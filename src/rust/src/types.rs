@@ -7,13 +7,8 @@ use pyo3::{PyTraverseError, PyVisit};
 use regex::Regex;
 
 use crate::error::IntoPyErr;
+use crate::util::Maybe;
 use crate::{ITEMS_VIEW_TYPE, KEYS_VIEW_TYPE, VALUES_VIEW_TYPE};
-
-#[derive(Clone, Debug)]
-pub enum Maybe<T> {
-    Some(T),
-    Missing,
-}
 
 impl<'source> FromPyObject<'source> for Maybe<&'source PyAny> {
     fn extract(ob: &'source PyAny) -> PyResult<Self> {

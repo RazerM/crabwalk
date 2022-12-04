@@ -17,10 +17,12 @@ use pyo3::{ffi, AsPyPointer, PyTypeInfo};
 use crate::direntry::DirEntry;
 use crate::error::IntoPyErr;
 use crate::types::{Selection, Types};
+use crate::util::{fspath, fspath_list};
 
 mod direntry;
 mod error;
 mod types;
+mod util;
 
 static TYPES_MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
 static KEYS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
@@ -715,22 +717,6 @@ fn convert_and_call_onerror(py: Python<'_>, onerror: &PyAny, err: ignore::Error)
         onerror.call1((err.into_py_err(py),))?;
     }
     Ok(())
-}
-
-fn fspath(path: &PyAny) -> PyResult<&PyAny> {
-    let py = path.py();
-    let path: &PyAny = unsafe {
-        let ptr = ffi::PyOS_FSPath(path.as_ptr());
-        py.from_owned_ptr_or_err(ptr)?
-    };
-    Ok(path)
-}
-
-fn fspath_list(paths: &PyList) -> PyResult<Vec<OsString>> {
-    paths
-        .iter()
-        .map(|path| fspath(path).and_then(PyAny::extract))
-        .collect()
 }
 
 #[pymodule]
