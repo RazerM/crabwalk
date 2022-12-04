@@ -174,25 +174,25 @@ impl Walk {
         Ok(instance)
     }
 
-    #[getter]
-    fn standard_filters(&self) -> bool {
-        self.hidden
-            && self.parents
-            && self.ignore
-            && self.git_ignore
-            && self.git_global
-            && self.git_exclude
+    fn disable_standard_filters(&mut self) -> PyResult<()> {
+        self.check_not_started_setter()?;
+        self.hidden = false;
+        self.parents = false;
+        self.ignore = false;
+        self.git_ignore = false;
+        self.git_global = false;
+        self.git_exclude = false;
+        Ok(())
     }
 
-    #[setter]
-    fn set_standard_filters(&mut self, value: bool) -> PyResult<()> {
+    fn enable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.hidden = value;
-        self.parents = value;
-        self.ignore = value;
-        self.git_ignore = value;
-        self.git_global = value;
-        self.git_exclude = value;
+        self.hidden = true;
+        self.parents = true;
+        self.ignore = true;
+        self.git_ignore = true;
+        self.git_global = true;
+        self.git_exclude = true;
         Ok(())
     }
 
