@@ -618,7 +618,7 @@ impl Walk {
         if let Some(overrides) = &self.overrides {
             let overrides = overrides.as_ref(py);
             if !overrides.is_none() {
-                let path: OsString = fspath(overrides.getattr("_path")?)?.extract()?;
+                let path: OsString = fspath(overrides.getattr("path")?)?.extract()?;
                 let mut overrides_builder = OverrideBuilder::new(path);
                 for override_ in overrides.iter()? {
                     let override_ = override_?;

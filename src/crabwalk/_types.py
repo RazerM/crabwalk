@@ -134,6 +134,10 @@ class Overrides(MutableSequence[OverrideT]):
         self._overrides = []
         self.extend(overrides)
 
+    @property
+    def path(self) -> str:
+        return self._path
+
     @overload
     def __getitem__(self, index: int) -> Override:
         ...
