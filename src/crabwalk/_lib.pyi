@@ -35,6 +35,7 @@ class DirEntry:
     def is_symlink(self) -> bool: ...
     file_name: str
     depth: int
+    def __fspath__(self) -> str: ...
 
 VIn: TypeAlias = Sequence[str]
 VOut: TypeAlias = tuple[str, ...]

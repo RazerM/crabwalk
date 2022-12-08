@@ -60,4 +60,8 @@ impl DirEntry {
     fn depth(&self) -> usize {
         self.inner.depth()
     }
+
+    fn __fspath__(&self) -> &Path {
+        self.inner.path()
+    }
 }
