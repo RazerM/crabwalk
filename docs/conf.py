@@ -27,8 +27,6 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "myst_parser",
-    # Local extensions
-    "use_text_signature",
 ]
 
 templates_path = ["_templates"]
