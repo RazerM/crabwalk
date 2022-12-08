@@ -78,7 +78,7 @@ class Walk:
         git_exclude: bool = ...,
         require_git: bool = ...,
         ignore_case_insensitive: bool = ...,
-        sort_key: Callable[[str], SupportsRichComparison] | None = ...,
+        sort: Callable[[str], SupportsRichComparison] | bool = ...,
         same_file_system: bool = ...,
         skip_stdout: bool = ...,
         filter_entry: Callable[[DirEntry], bool] | None = ...,
@@ -105,7 +105,7 @@ class Walk:
     git_exclude: bool
     require_git: bool
     ignore_case_insensitive: bool
-    sort_key: Callable[[DirEntry], bool] | None
+    sort: Callable[[DirEntry], bool] | bool
     same_file_system: bool
     skip_stdout: bool
     filter_entry: Callable[[DirEntry], bool] | None

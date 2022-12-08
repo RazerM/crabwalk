@@ -80,7 +80,7 @@ pub struct Walk {
     git_exclude: bool,
     require_git: bool,
     ignore_case_insensitive: bool,
-    sort_key: Option<PyObject>,
+    sort: Option<PyObject>,
     same_file_system: bool,
     skip_stdout: bool,
     filter_entry: Option<PyObject>,
@@ -107,7 +107,7 @@ impl Walk {
         git_exclude = "true",
         require_git = "true",
         ignore_case_insensitive = "false",
-        sort_key = "None",
+        sort = "None",
         same_file_system = "false",
         skip_stdout = "false",
         filter_entry = "None",
@@ -132,7 +132,7 @@ impl Walk {
         git_exclude: bool,
         require_git: bool,
         ignore_case_insensitive: bool,
-        sort_key: Option<PyObject>,
+        sort: Option<PyObject>,
         same_file_system: bool,
         skip_stdout: bool,
         filter_entry: Option<PyObject>,
@@ -146,6 +146,16 @@ impl Walk {
         let custom_ignore_filenames = match custom_ignore_filenames {
             Some(seq) => Some(seq.list()?.into_py(py)),
             None => Some(PyList::empty(py).into_py(py)),
+        };
+        let sort = match sort {
+            Some(sort) => {
+                if sort.is_true(py)? {
+                    Some(sort)
+                } else {
+                    None
+                }
+            }
+            None => None,
         };
         let mut instance = Self {
             state: State::Unopened,
@@ -165,7 +175,7 @@ impl Walk {
             git_exclude,
             require_git,
             ignore_case_insensitive,
-            sort_key: sort_key.map(|s| s.into_py(py)),
+            sort,
             same_file_system,
             skip_stdout,
             filter_entry: filter_entry.map(|f| f.into_py(py)),
@@ -386,14 +396,18 @@ impl Walk {
     }
 
     #[getter]
-    fn sort_key(&self) -> Option<PyObject> {
-        self.sort_key.clone()
+    fn sort(&self, py: Python<'_>) -> PyObject {
+        self.sort.clone().unwrap_or_else(|| false.into_py(py))
     }
 
     #[setter]
-    fn set_sort_key(&mut self, value: Option<PyObject>) -> PyResult<()> {
+    fn set_sort(&mut self, py: Python<'_>, value: PyObject) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.sort_key = value;
+        self.sort = if value.is_true(py)? {
+            Some(value)
+        } else {
+            None
+        };
         Ok(())
     }
 
@@ -527,8 +541,8 @@ impl Walk {
         if let Some(types) = &self.types {
             visit.call(types)?;
         }
-        if let Some(sort_key) = &self.sort_key {
-            visit.call(sort_key)?;
+        if let Some(sort) = &self.sort {
+            visit.call(sort)?;
         }
         if let Some(filter_entry) = &self.filter_entry {
             visit.call(filter_entry)?;
@@ -545,7 +559,7 @@ impl Walk {
         self.custom_ignore_filenames = None;
         self.overrides = None;
         self.types = None;
-        self.sort_key = None;
+        self.sort = None;
         self.filter_entry = None;
         self.onerror = None;
     }
@@ -631,34 +645,38 @@ impl Walk {
             });
         }
 
-        if let Some(sort_key) = self.sort_key.clone() {
-            builder.sort_by_file_path(move |a, b| {
-                fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
-                    Python::with_gil(|py| {
-                        let a = sort_key.call1(py, (a.as_os_str(),))?;
-                        let b = sort_key.call1(py, (b.as_os_str(),))?;
+        if let Some(sort) = self.sort.clone() {
+            if sort.as_ref(py).is_callable() {
+                builder.sort_by_file_path(move |a, b| {
+                    fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
+                        Python::with_gil(|py| {
+                            let a = sort_key.call1(py, (a.as_os_str(),))?;
+                            let b = sort_key.call1(py, (b.as_os_str(),))?;
 
-                        let ra = a.as_ref(py);
-                        let rb = b.as_ref(py);
+                            let ra = a.as_ref(py);
+                            let rb = b.as_ref(py);
 
-                        Ok(match ra.gt(rb)? as i8 - ra.lt(rb)? as i8 {
-                            -1 => Ordering::Less,
-                            0 => Ordering::Equal,
-                            1 => Ordering::Greater,
-                            _z => unreachable!(),
+                            Ok(match ra.gt(rb)? as i8 - ra.lt(rb)? as i8 {
+                                -1 => Ordering::Less,
+                                0 => Ordering::Equal,
+                                1 => Ordering::Greater,
+                                _ => unreachable!(),
+                            })
                         })
-                    })
-                }
+                    }
 
-                inner(&sort_key, a, b).unwrap_or_else(|err| {
-                    Python::with_gil(|py| {
-                        if !PyErr::occurred(py) {
-                            err.restore(py);
-                        }
-                    });
-                    a.cmp(b)
-                })
-            });
+                    inner(&sort, a, b).unwrap_or_else(|err| {
+                        Python::with_gil(|py| {
+                            if !PyErr::occurred(py) {
+                                err.restore(py);
+                            }
+                        });
+                        a.cmp(b)
+                    })
+                });
+            } else {
+                builder.sort_by_file_path(|a, b| a.cmp(b));
+            }
         }
 
         if let Some(overrides) = self.overrides.clone() {
