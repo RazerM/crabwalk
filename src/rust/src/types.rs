@@ -21,7 +21,11 @@ pub enum Selection {
     Negate(String),
 }
 
-#[pyclass(module = "crabwalk", mapping)]
+#[pyclass(
+    module = "crabwalk",
+    mapping,
+    text_signature = "(other=(), /, **kwargs)"
+)]
 #[derive(Clone)]
 pub struct Types {
     types: Option<Py<PyDict>>,
@@ -31,11 +35,15 @@ pub struct Types {
 #[pymethods]
 impl Types {
     #[new]
-    fn new(py: Python<'_>) -> Self {
-        Self {
+    // https://github.com/PyO3/pyo3/issues/2799
+    #[args(__initial = "None", "/", kwargs = "**")]
+    fn new(py: Python<'_>, __initial: Option<&PyAny>, kwargs: Option<&PyDict>) -> PyResult<Self> {
+        let instance = Self {
             types: Some(PyDict::new(py).into_py(py)),
             selections: Vec::new(),
-        }
+        };
+        instance.update(py, __initial, kwargs)?;
+        Ok(instance)
     }
 
     pub fn __getitem__(&self, py: Python<'_>, name: &PyAny) -> PyResult<Py<PyTuple>> {
