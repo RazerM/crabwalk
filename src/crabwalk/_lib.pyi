@@ -67,7 +67,7 @@ class Walk:
         follow_links: bool = ...,
         max_filesize: int | None = ...,
         global_ignore_files: Sequence[StrPath] | None = ...,
-        custom_ignore_filenames: Sequence[StrPath] | None = ...,
+        custom_ignore_filenames: Sequence[str] | None = ...,
         overrides: Overrides | None = ...,
         types: Types | None = ...,
         hidden: bool = ...,
@@ -94,7 +94,7 @@ class Walk:
     @property
     def global_ignore_files(self) -> list[StrPath]: ...
     @property
-    def custom_ignore_filenames(self) -> list[StrPath]: ...
+    def custom_ignore_filenames(self) -> list[str]: ...
     overrides: Overrides | None
     types: Types | None
     hidden: bool

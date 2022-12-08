@@ -621,8 +621,14 @@ impl Walk {
             }
         }
 
-        for path in fspath_list(self.custom_ignore_filenames.as_ref().unwrap().as_ref(py))? {
-            builder.add_custom_ignore_filename(path);
+        for path in self
+            .custom_ignore_filenames
+            .as_ref()
+            .unwrap()
+            .as_ref(py)
+            .iter()
+        {
+            builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
         if let Some(filter_entry) = self.filter_entry.clone() {
