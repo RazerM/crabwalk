@@ -97,6 +97,18 @@ class UnrecognizedFileTypeError(IgnoreError):
 
 
 class Override(NamedTuple):
+    """A :class:`~collections.namedtuple` used by :class:`Overrides`.
+
+    :param glob: A glob with the same semantics as a single line in a
+        ``.gitignore`` file, where the meaning of ``!`` is inverted: namely,
+        ``!`` at the beginning of a glob will ignore a file. Without ``!``, all
+        matches of the glob provided are treated as whitelist matches.
+    :type glob: str
+    :param case_insensitive: Whether this glob should be matched case
+        insensitively or not.
+    :type case_insensitive: bool
+    """
+
     glob: str
     case_insensitive: bool = False
 
@@ -115,6 +127,27 @@ OverrideT = Union[str, Tuple[str, bool]]
 
 
 class Overrides(MutableSequence[OverrideT]):
+    """A :class:`~collections.abc.MutableSequence` of :class:`Override` tuples.
+
+    Strings and tuples will be coerced to :class:`Override` instances.
+
+    :param overrides: An iterable of globs, ``(glob, case_insensitive)``
+        tuples, or :class:`Override` namedtuples.
+
+        .. testsetup::
+
+            from crabwalk import Overrides, Override
+
+        .. doctest::
+
+            >>> o = Overrides(["*.py", ("*.pyi", True), Override("!*.pyc")], path=".")
+            >>> assert o[0] == Override("*.py", False)
+            >>> assert o[1] == Override("*.pyi", True)
+            >>> assert o[2] == Override("!*.pyc", False)
+    :param path: Globs are matched relative to this path.
+
+    """
+
     _path: str
     _overrides: List[Override]
 
@@ -136,6 +169,7 @@ class Overrides(MutableSequence[OverrideT]):
 
     @property
     def path(self) -> str:
+        """Read-only attribute of specified path."""
         return self._path
 
     @overload

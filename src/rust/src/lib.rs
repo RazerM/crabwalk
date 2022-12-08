@@ -187,8 +187,6 @@ impl Walk {
         Ok(instance)
     }
 
-    /// Disable the `hidden`, `parents`, `ignore`, `git_ignore`, `git_global`, and `git_exclude`
-    /// filters.
     #[pyo3(text_signature = "()")]
     fn disable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
@@ -201,8 +199,6 @@ impl Walk {
         Ok(())
     }
 
-    /// Enable the `hidden`, `parents`, `ignore`, `git_ignore`, `git_global`, and `git_exclude`
-    /// filters.
     #[pyo3(text_signature = "()")]
     fn enable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
@@ -474,6 +470,9 @@ impl Walk {
         Ok(self_)
     }
 
+    /// Close the iterator and free acquired resources
+    ///
+    /// It is recommended to use a ``with`` statement instead.
     #[pyo3(text_signature = "()")]
     fn close(&mut self) {
         self.state = State::Closed;

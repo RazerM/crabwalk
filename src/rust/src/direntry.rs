@@ -3,7 +3,6 @@ use std::path::Path;
 
 use pyo3::prelude::*;
 
-/// A directory entry
 #[pyclass(module = "crabwalk")]
 pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
