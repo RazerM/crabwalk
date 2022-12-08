@@ -189,6 +189,7 @@ impl Walk {
 
     /// Disable the `hidden`, `parents`, `ignore`, `git_ignore`, `git_global`, and `git_exclude`
     /// filters.
+    #[pyo3(text_signature = "()")]
     fn disable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.hidden = false;
@@ -202,6 +203,7 @@ impl Walk {
 
     /// Enable the `hidden`, `parents`, `ignore`, `git_ignore`, `git_global`, and `git_exclude`
     /// filters.
+    #[pyo3(text_signature = "()")]
     fn enable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.hidden = true;
