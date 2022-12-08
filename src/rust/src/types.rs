@@ -164,17 +164,12 @@ impl Types {
         Ok(())
     }
 
-    // I wanted to do the following, but then pyo3 doesn't
+    // I wanted to do the following, but then pyo3 doesn't pass the default argument
     // #[args(key, default = "Maybe::Missing", "/")]
     // #[pyo3(text_signature = "(key, default=<missing>, /)")]
     #[args(key, "/", default = "Maybe::Missing")]
     #[pyo3(text_signature = "(key, /, default=<missing>)")]
-    pub fn pop(
-        &self,
-        py: Python<'_>,
-        key: &PyAny,
-        default: Maybe<&PyAny>,
-    ) -> PyResult<PyObject> {
+    pub fn pop(&self, py: Python<'_>, key: &PyAny, default: Maybe<&PyAny>) -> PyResult<PyObject> {
         match self.__getitem__(py, key) {
             Ok(globs) => {
                 self.__delitem__(py, key)?;
