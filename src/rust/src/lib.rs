@@ -179,7 +179,7 @@ impl Walk {
             same_file_system,
             skip_stdout,
             filter_entry: filter_entry.map(|f| f.into_py(py)),
-            onerror: Some(onerror.into_py(py)),
+            onerror: onerror.map(|c| c.into_py(py)),
         };
         if let Some(overrides) = overrides {
             instance.set_overrides(py, Some(overrides.as_ref(py)))?;
