@@ -134,10 +134,6 @@ class Overrides(MutableSequence[OverrideT]):
     :param overrides: An iterable of globs, ``(glob, case_insensitive)``
         tuples, or :class:`Override` namedtuples.
 
-        .. testsetup::
-
-            from crabwalk import Overrides, Override
-
         .. doctest::
 
             >>> o = Overrides(["*.py", ("*.pyi", True), Override("!*.pyc")], path=".")

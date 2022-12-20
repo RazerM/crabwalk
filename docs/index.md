@@ -18,5 +18,7 @@ $ python -m pip install crabwalk
 ```
 
 ```{toctree}
+:hidden:
+
 api-reference
 ```

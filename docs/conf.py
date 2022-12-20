@@ -50,3 +50,7 @@ intersphinx_mapping = {
 
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
+
+doctest_global_setup = """
+from crabwalk import Override, Overrides, Types, Walk
+"""

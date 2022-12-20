@@ -83,17 +83,17 @@ API Reference
         to either log the error or re-raise it.
     :type onerror: typing.Optional[typing.Callable[[Exception], None]]
 
-    .. method:: disable_standard_filters()
+    .. method:: disable_standard_filters() -> None
 
         Disable the :attr:`hidden`, :attr:`parents`, :attr:`ignore`,
         :attr:`git_ignore`, :attr:`git_global`, and :attr:`git_exclude` filters.
 
-    .. method:: enable_standard_filters()
+    .. method:: enable_standard_filters() -> None
 
         Enable the :attr:`hidden`, :attr:`parents`, :attr:`ignore`,
         :attr:`git_ignore`, :attr:`git_global`, and :attr:`git_exclude` filters.
 
-    .. method:: close()
+    .. method:: close() -> None
 
         Close the iterator and free acquired resources
 
@@ -145,6 +145,43 @@ API Reference
         The depth at which this entry was created relative to the root.
 
 .. autoclass:: Types
+
+    A collection of
+
+    ``Types`` implements the :class:`~collections.abc.MutableMapping` interface.
+
+    .. method:: add(name: str, glob: str) -> None
+
+        Add ``glob`` to type with name ``name``.
+
+        .. doctest::
+
+            >>> types = Types()
+            >>> types.add("py", "*.py")
+            >>> types.add("py", "*.pyi")
+            >>> types["py"]
+            ('*.py', '*.pyi')
+
+    .. method:: add_defaults() -> None
+
+        .. doctest::
+
+            >>> types = Types()
+            >>> types.add_defaults()
+            >>> types["py"]
+            ('*.py',)
+
+    .. method:: select(name: str) -> None
+
+        Select the file type given by ``name``.
+
+        If ``name`` is ``all``, then all file types currently defined are selected.
+
+    .. method:: negate(name: str) -> None
+
+        Ignore the file type given by ``name``.
+
+        If ``name`` is ``all``, then all file types currently defined are ignored.
 
 .. autoclass:: Override
 
