@@ -186,3 +186,45 @@ API Reference
 .. autoclass:: Override
 
 .. autoclass:: Overrides
+
+Exceptions
+----------
+
+.. exception:: WalkError
+
+    Base class for all exceptions raised by the ``crabwalk`` package.
+
+    .. attribute:: line
+
+        A line number if this error is associated with one.
+
+    .. attribute:: path
+
+        A file path is this error is associated with one.
+
+    .. attribute:: depth
+
+        A directory depth if this error is associated with one while recursively
+        walking a directory.
+
+.. exception:: LoopError
+
+    An error that occurs when a file loop is detected when traversing symbolic
+    links.
+
+.. exception:: GlobError
+
+    An error that occurs when trying to parse a glob.
+
+.. exception:: PartialError
+
+    A collection of “soft” errors. These occur when adding an ignore file
+    partially succeeded.
+
+.. exception:: InvalidDefinitionError
+
+    A user specified file type definition could not be parsed.
+
+.. exception:: UnrecognizedFileTypeError
+
+    A type selection for a file type that is not defined.

@@ -18,7 +18,7 @@ def _display(s: str):
     return os.fsencode(s).decode(sys.getfilesystemencoding(), "replace")
 
 
-class IgnoreError(Exception):
+class WalkError(Exception):
     def __init__(
         self,
         *args: object,
@@ -45,7 +45,7 @@ class IgnoreError(Exception):
         return "".join(parts)
 
 
-class LoopError(IgnoreError):
+class LoopError(WalkError):
     def __init__(self, *, ancestor: str, child: str, **kwargs) -> None:
         super().__init__(**kwargs)
         self.ancestor = ancestor
@@ -58,7 +58,7 @@ class LoopError(IgnoreError):
         )
 
 
-class GlobError(IgnoreError):
+class GlobError(WalkError):
     def __init__(self, message: str, *, glob: Optional[str] = None, **kwargs) -> None:
         super().__init__(message, **kwargs)
         self.glob = glob
@@ -71,7 +71,7 @@ class GlobError(IgnoreError):
         return f"{self._prefix}{msg}"
 
 
-class PartialError(IgnoreError):
+class PartialError(WalkError):
     def __init__(self, errors):
         self.errors = errors
 
@@ -79,7 +79,7 @@ class PartialError(IgnoreError):
         return "\n".join(str(error) for error in self.errors)
 
 
-class InvalidDefinitionError(IgnoreError):
+class InvalidDefinitionError(WalkError):
     def __init__(self):
         super().__init__()
 
@@ -87,7 +87,7 @@ class InvalidDefinitionError(IgnoreError):
         return "invalid definition (format is type:glob, e.g. html:*.html)"
 
 
-class UnrecognizedFileTypeError(IgnoreError):
+class UnrecognizedFileTypeError(WalkError):
     def __init__(self, *, name: str):
         super().__init__()
         self.name = name
