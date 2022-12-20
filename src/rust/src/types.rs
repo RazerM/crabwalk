@@ -24,7 +24,7 @@ pub enum Selection {
 #[pyclass(
     module = "crabwalk",
     mapping,
-    text_signature = "(other=(), /, **kwargs)"
+    text_signature = "(initial=(), /, **kwargs)"
 )]
 #[derive(Clone)]
 pub struct Types {
@@ -200,15 +200,16 @@ impl Types {
         self.types.as_ref().unwrap().as_ref(py).clear()
     }
 
-    #[args(other = "None", "/", kwargs = "**")]
-    #[pyo3(text_signature = "(other, /, **kwargs)")]
+    // https://github.com/PyO3/pyo3/issues/2799
+    #[args(__other = "None", "/", kwargs = "**")]
+    #[pyo3(text_signature = "(other=(), /, **kwargs)")]
     pub fn update(
         &self,
         py: Python<'_>,
-        other: Option<&PyAny>,
+        __other: Option<&PyAny>,
         kwargs: Option<&PyDict>,
     ) -> PyResult<()> {
-        let other = other.unwrap_or_else(|| PyTuple::empty(py));
+        let other = __other.unwrap_or_else(|| PyTuple::empty(py));
         if let Ok(other) = other.downcast::<PyMapping>() {
             for name in other.iter()? {
                 let name = name?;
