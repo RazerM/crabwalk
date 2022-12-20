@@ -1,5 +1,5 @@
 use pyo3::basic::CompareOp;
-use pyo3::exceptions::PyKeyError;
+use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyIterator, PyList, PyMapping, PySequence, PyString, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
@@ -318,6 +318,39 @@ impl Types {
         } else {
             self.selections.push(Selection::Negate(name.to_string()));
         }
+    }
+
+    fn __getnewargs__(&self) -> (Py<PyDict>,) {
+        (self.types.clone().unwrap(),)
+    }
+
+    fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let selections: Vec<_> = self
+            .selections
+            .iter()
+            .map(|selection| match selection {
+                Selection::Select(name) => ("select", name),
+                Selection::Negate(name) => ("negate", name),
+            })
+            .collect();
+        let state = PyDict::new(py);
+        state.set_item("selections", selections.to_object(py))?;
+        Ok(state.into())
+    }
+
+    fn __setstate__(&mut self, py: Python<'_>, state: Py<PyDict>) -> PyResult<()> {
+        let state = state.as_ref(py);
+        let selections = <PyAny>::get_item(state, "selections")?;
+        let selections: Vec<(String, String)> = selections.extract()?;
+        self.selections = selections
+            .into_iter()
+            .map(|(case, name)| match case.as_ref() {
+                "select" => Ok(Selection::Select(name)),
+                "negate" => Ok(Selection::Negate(name)),
+                _ => Err(PyValueError::new_err("Invalid state")),
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(())
     }
 
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
