@@ -17,8 +17,15 @@ docs = [
     "furo",
     "myst-parser",
     "sphinx",
+    "doc8",
+]
+test = [
+    "pytest",
 ]
 
 [tool.isort]
 profile = "black"
 known_first_party = ["crabwalk"]
+
+[tool.doc8]
+ignore-path = "docs/_build/"
