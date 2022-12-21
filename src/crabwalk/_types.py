@@ -31,7 +31,7 @@ class WalkError(Exception):
         self.path = path
         self.depth = depth
 
-    def __reduce__(self) -> tuple[Any, ...]:
+    def __reduce__(self) -> Tuple[Any, ...]:
         cls = type(self)
         return cls.__new__, (cls, *self.args), self.__dict__
 
