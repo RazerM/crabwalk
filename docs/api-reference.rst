@@ -114,9 +114,12 @@ API Reference
         The entry's full path name. The path is only absolute if the
         :class:`Walk` path argument was absolute.
 
-    .. method:: inode() -> int
+    .. method:: inode() -> int | None
 
         Return the inode number of the entry.
+
+        .. warning:: Returns ``None`` on non-Unix platforms. Use :func:`os.stat` instead.
+
     .. method:: is_dir() -> bool
 
         Returns whether this entry is a directory or if :class:`Walk` was
