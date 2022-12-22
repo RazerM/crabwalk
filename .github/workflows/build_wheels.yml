@@ -13,9 +13,11 @@ jobs:
 
     env:
       CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y"
+      CIBW_BEFORE_ALL_MACOS: "rustup target add aarch64-apple-darwin"
       CIBW_BUILD_VERBOSITY: "1"
       CIBW_ENVIRONMENT: 'PATH="$PATH:$HOME/.cargo/bin"'
       CIBW_SKIP: "*-musllinux_i686 pp*-win_amd64"
+      CIBW_ARCHS_MACOS: "x86_64 universal2"
 
     steps:
       - uses: actions/checkout@v3
