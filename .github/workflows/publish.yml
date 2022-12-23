@@ -29,7 +29,9 @@ jobs:
 
       - name: Limit build to certain wheels as a test since this is not a release
         if: github.event_name == 'pull_request' && runner.os != 'Windows'
-        run: echo 'CIBW_BUILD=cp37-* pp37-*' >> $GITHUB_ENV
+        run: |
+          echo 'CIBW_BUILD=cp37-* pp37-*' >> $GITHUB_ENV
+          echo "CIBW_ARCHS_LINUX=auto" >> $GITHUB_ENV
 
       - name: Limit build to certain wheels as a test since this is not a release
         if: github.event_name == 'pull_request' && runner.os == 'Windows'
