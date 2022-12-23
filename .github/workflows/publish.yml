@@ -22,6 +22,7 @@ jobs:
       CIBW_ENVIRONMENT: 'PATH="$PATH:$HOME/.cargo/bin"'
       CIBW_SKIP: "*-musllinux_i686 pp*-win_amd64"
       CIBW_ARCHS_MACOS: "auto universal2"
+      CIBW_ARCHS_LINUX: "auto aarch64"
 
     steps:
       - uses: actions/checkout@v3
@@ -33,6 +34,12 @@ jobs:
       - name: Limit build to certain wheels as a test since this is not a release
         if: github.event_name == 'pull_request' && runner.os == 'Windows'
         run: echo 'CIBW_BUILD=cp37-* pp37-*' >> $env:GITHUB_ENV
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: arm64
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.11.3
