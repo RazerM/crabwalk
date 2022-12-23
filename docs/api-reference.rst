@@ -8,7 +8,7 @@ API Reference
     Recursive directory iterator which yields :class:`DirEntry` objects.
 
     If ``Walk`` is not closed (either by using a ``with`` statement or calling
-    :meth:`close` explicitly) then a :class:`ResourceWarning` will be emittted
+    :meth:`close` explicitly) then a :class:`ResourceWarning` will be emitted
     in its destructor.
 
     :param paths: Paths to iterate recursively.

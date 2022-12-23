@@ -35,7 +35,6 @@ enum State {
     Closed,
 }
 
-/// Walk is a recursive directory iterator over file paths in one or more directories.
 #[pyclass(
     module = "crabwalk",
     text_signature = "(\
