@@ -28,8 +28,14 @@ impl DirEntry {
         self.inner.path()
     }
 
+    #[cfg(unix)]
     fn inode(&self) -> u64 {
         self.inner.ino().expect("DirEntry is not Stdin")
+    }
+
+    #[cfg(not(unix))]
+    fn inode(&self, py: Python<'_>) -> PyObject {
+        py.None()
     }
 
     fn is_dir(&self) -> bool {
