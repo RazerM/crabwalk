@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
@@ -19,7 +20,7 @@ def raise_error(exc: Exception) -> NoReturn:
     raise exc
 
 
-def test_loop(tmp_path):
+def test_loop(tmp_path: Path) -> None:
     ancestor = tmp_path / "root"
     ancestor.mkdir()
     child = ancestor / "loop"
@@ -41,7 +42,7 @@ def test_loop(tmp_path):
 
 
 @pytest.mark.parametrize("filename", [".ignore", ".gitignore", ".testignore"])
-def test_ignore_glob_error(tmp_path, filename):
+def test_ignore_glob_error(tmp_path: Path, filename: str) -> None:
     ignore = tmp_path / filename
     glob = "{"
     ignore.write_text(glob)
@@ -62,7 +63,7 @@ def test_ignore_glob_error(tmp_path, filename):
     )
 
 
-def test_override_glob_error(tmp_path):
+def test_override_glob_error(tmp_path: Path) -> None:
     overrides = Overrides(path=tmp_path)
     glob = "{"
     overrides.append(glob)
@@ -82,7 +83,7 @@ def test_override_glob_error(tmp_path):
     )
 
 
-def test_uncrecognized_file_type_error(tmp_path):
+def test_uncrecognized_file_type_error(tmp_path: Path) -> None:
     types = Types()
     file_type = "foo"
     types.select(file_type)
@@ -99,7 +100,7 @@ def test_uncrecognized_file_type_error(tmp_path):
     assert str(exc_info.value) == "unrecognized file type: foo"
 
 
-def test_invalid_definition_error(tmp_path):
+def test_invalid_definition_error(tmp_path: Path) -> None:
     types = Types()
 
     with pytest.raises(InvalidDefinitionError) as exc_info:
@@ -113,7 +114,7 @@ def test_invalid_definition_error(tmp_path):
     )
 
 
-def test_partial_error(tmp_path):
+def test_partial_error(tmp_path: Path) -> None:
     ignore = tmp_path / "myignore"
     ignore.write_text("{\na{")
 

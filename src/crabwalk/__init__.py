@@ -22,10 +22,13 @@ WalkError.__module__ = __name__
 __all__ = (
     "DirEntry",
     "GlobError",
-    "WalkError",
+    "InvalidDefinitionError",
     "LoopError",
     "Override",
     "Overrides",
+    "PartialError",
     "Types",
+    "UnrecognizedFileTypeError",
     "Walk",
+    "WalkError",
 )

@@ -1,6 +1,7 @@
 import pickle
 from collections.abc import Mapping, MutableMapping
 from copy import deepcopy
+from typing import Iterator, List
 
 from crabwalk import Types
 
@@ -18,10 +19,10 @@ def test_new() -> None:
     assert types["py"] == ("*.py",)
 
     class A:
-        def keys(self):
+        def keys(self) -> Iterator[str]:
             yield "rust"
 
-        def __getitem__(self, key):
+        def __getitem__(self, key: str) -> List[str]:
             if key == "rust":
                 return ["*.rs"]
             else:
@@ -43,10 +44,10 @@ def test_update() -> None:
     assert types["py"] == ("*.py",)
 
     class A:
-        def keys(self):
+        def keys(self) -> Iterator[str]:
             yield "rust"
 
-        def __getitem__(self, key):
+        def __getitem__(self, key: str) -> List[str]:
             if key == "rust":
                 return ["*.rs"]
             else:

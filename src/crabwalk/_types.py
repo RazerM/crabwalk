@@ -1,20 +1,20 @@
 import os
 import sys
 from typing import (
-    Any,
     Iterable,
     Iterator,
     List,
     MutableSequence,
     NamedTuple,
     Optional,
+    Sequence,
     Tuple,
     Union,
     overload,
 )
 
 
-def _display(s: str):
+def _display(s: str) -> str:
     return os.fsencode(s).decode(sys.getfilesystemencoding(), "replace")
 
 
@@ -31,7 +31,7 @@ class WalkError(Exception):
         self.path = path
         self.depth = depth
 
-    def __reduce__(self) -> Tuple[Any, ...]:
+    def __reduce__(self) -> Tuple[object, ...]:
         cls = type(self)
         return cls.__new__, (cls, *self.args), self.__dict__
 
@@ -46,8 +46,16 @@ class WalkError(Exception):
 
 
 class LoopError(WalkError):
-    def __init__(self, *, ancestor: str, child: str, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        *,
+        ancestor: str,
+        child: str,
+        line: Optional[int] = None,
+        path: Optional[str] = None,
+        depth: Optional[int] = None,
+    ) -> None:
+        super().__init__(line=line, path=path, depth=depth)
         self.ancestor = ancestor
         self.child = child
 
@@ -59,8 +67,16 @@ class LoopError(WalkError):
 
 
 class GlobError(WalkError):
-    def __init__(self, message: str, *, glob: Optional[str] = None, **kwargs) -> None:
-        super().__init__(message, **kwargs)
+    def __init__(
+        self,
+        message: str,
+        *,
+        glob: Optional[str] = None,
+        line: Optional[int] = None,
+        path: Optional[str] = None,
+        depth: Optional[int] = None,
+    ) -> None:
+        super().__init__(message, line=line, path=path, depth=depth)
         self.glob = glob
 
     def __str__(self) -> str:
@@ -72,7 +88,9 @@ class GlobError(WalkError):
 
 
 class PartialError(WalkError):
-    def __init__(self, errors):
+    errors: Sequence[WalkError]
+
+    def __init__(self, errors: Sequence[WalkError]) -> None:
         self.errors = errors
 
     def __str__(self) -> str:
@@ -80,7 +98,7 @@ class PartialError(WalkError):
 
 
 class InvalidDefinitionError(WalkError):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def __str__(self) -> str:
@@ -88,7 +106,7 @@ class InvalidDefinitionError(WalkError):
 
 
 class UnrecognizedFileTypeError(WalkError):
-    def __init__(self, *, name: str):
+    def __init__(self, *, name: str) -> None:
         super().__init__()
         self.name = name
 
@@ -224,6 +242,6 @@ class Overrides(MutableSequence[OverrideT]):
     def pop(self, index: int = -1) -> Override:
         return self._overrides.pop(index)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         cls = type(self)
         return f"{cls.__name__}({self._overrides!r}, path={self._path!r})"
