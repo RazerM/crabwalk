@@ -17,7 +17,7 @@
 
 <!-- blurb-begin -->
 
-crabwalk is a Python package built on top of the excellent [ignore][] crate:
+crabwalk is a Python package built in Rust on top of the excellent [ignore][] crate:
 
 > The ignore crate provides a fast recursive directory iterator that respects
 > various filters such as globs, file types and .gitignore files.
