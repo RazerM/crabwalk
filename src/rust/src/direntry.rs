@@ -2,15 +2,23 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use pyo3::prelude::*;
+#[cfg(not(unix))] use pyo3::types::IntoPyDict;
 
 #[pyclass(module = "crabwalk")]
 pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
+    #[cfg(not(unix))] follow_links: bool,
+    #[cfg(not(unix))] file_index: Option<u64>
 }
 
 impl DirEntry {
-    pub(crate) fn new(dir_entry: ignore::DirEntry) -> Self {
-        Self { inner: dir_entry }
+    #[cfg_attr(unix, allow(unused_variables))]
+    pub(crate) fn new(dir_entry: ignore::DirEntry, follow_links: bool) -> Self {
+        Self {
+            inner: dir_entry,
+            #[cfg(not(unix))] follow_links,
+            #[cfg(not(unix))] file_index: None,
+        }
     }
 }
 
@@ -34,8 +42,20 @@ impl DirEntry {
     }
 
     #[cfg(not(unix))]
-    fn inode(&self, py: Python<'_>) -> PyObject {
-        py.None()
+    fn inode(&mut self, py: Python<'_>) -> PyResult<u64> {
+        match self.file_index {
+            Some(file_index) => Ok(file_index),
+            None => {
+                let kwargs = [("follow_symlinks", self.follow_links)];
+                let file_index = py.import("os")?
+                    .getattr("stat")?
+                    .call((self.inner.path(),), Some(kwargs.into_py_dict(py)))?
+                    .getattr("st_ino")?
+                    .extract()?;
+                self.file_index = Some(file_index);
+                Ok(file_index)
+            }
+        }
     }
 
     fn is_dir(&self) -> bool {

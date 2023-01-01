@@ -122,11 +122,20 @@ API Reference
         The entry's full path name. The path is only absolute if the
         :class:`Walk` path argument was absolute.
 
-    .. method:: inode() -> int | None
+    .. method:: inode() -> int
 
         Return the inode number of the entry.
 
-        .. warning:: Returns ``None`` on non-Unix platforms. Use :func:`os.stat` instead.
+        .. caution:: If ``follow_links=True`` and this entry is a symbolic link,
+            the inode number of the target is returned. This is different from
+            :class:`os.DirEntry` which always returns the inode number of the
+            symbolic link itself.
+
+            Use ``os.stat(entry.path, follow_symlinks=False).st_ino``
+            if that's what you want.
+
+        On the first, uncached call, a system call is required on Windows but
+        not on Unix.
 
     .. method:: is_dir() -> bool
 

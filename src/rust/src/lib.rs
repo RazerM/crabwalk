@@ -513,7 +513,7 @@ impl Walk {
                     if let Some(err) = dent.error() {
                         self.convert_and_call_onerror(py, err.clone())?;
                     }
-                    return Ok(Some(DirEntry::new(dent)));
+                    return Ok(Some(DirEntry::new(dent, self.follow_links)));
                 }
                 Err(err) => {
                     if let Some(onerror) = self.onerror.clone() {
@@ -632,8 +632,9 @@ impl Walk {
         }
 
         if let Some(filter_entry) = self.filter_entry.clone() {
+            let follow_links = self.follow_links;
             builder.filter_entry(move |dent| {
-                let py_dent = DirEntry::new(dent.clone());
+                let py_dent = DirEntry::new(dent.clone(), follow_links);
                 Python::with_gil(|py| {
                     filter_entry
                         .call1(py, (py_dent,))
