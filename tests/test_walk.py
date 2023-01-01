@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from typing import Callable, Iterator, List
@@ -5,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from crabwalk import Overrides, Types, Walk
+from crabwalk import DirEntry, Overrides, Types, Walk
 
 from .tree import Directory, File, Symlink
 
@@ -342,3 +343,76 @@ def test_sort_function(
     assert walk.sort == mock_sort
     assert list(walk_paths(walk)) == ["root", "root/a", "root/b"]
     assert {args[0] for _, args, _ in mock_sort.mock_calls} == {"root/a", "root/b"}
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("Ab"),
+        File("Ba"),
+    ),
+    chdir=True,
+)
+def test_sort_key(tree_path: Path, walk_paths: WalkPaths) -> None:
+    def key(path: str) -> str:
+        return os.path.basename(path)[1:]
+
+    walk = Walk("root", sort=key)
+    assert list(walk_paths(walk)) == ["root", "root/Ba", "root/Ab"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+        File("bar"),
+    ),
+    chdir=True,
+)
+def test_sort_exception(tree_path: Path) -> None:
+    class MyError(Exception):
+        pass
+
+    def key(path: str) -> str:
+        raise MyError
+
+    with pytest.raises(MyError):
+        with Walk("root", sort=key) as walk:
+            for _ in walk:
+                pass
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+        File("bar"),
+    ),
+    chdir=True,
+)
+def test_filter_entry(tree_path: Path, walk_paths: WalkPaths) -> None:
+    def filter_entry(entry: DirEntry) -> bool:
+        return entry.is_dir() or entry.name == "foo"
+
+    walk = Walk("root", filter_entry=filter_entry, sort=True)
+    assert list(walk_paths(walk)) == ["root", "root/foo"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_filter_entry_exception(tree_path: Path) -> None:
+    class MyError(Exception):
+        pass
+
+    def filter_entry(entry: DirEntry) -> bool:
+        raise MyError
+
+    with pytest.raises(MyError):
+        with Walk("root", filter_entry=filter_entry, sort=True) as walk:
+            for _ in walk:
+                pass
