@@ -108,6 +108,14 @@ API Reference
 
     ``DirEntry`` implements the :class:`os.PathLike` interface.
 
+    .. attribute:: name
+        :type: str
+
+        Return the base filename of this entry.
+
+        If this entry has no file name (e.g., ``/``), then the full path is
+        returned.
+
     .. attribute:: path
         :type: str
 
@@ -133,14 +141,6 @@ API Reference
     .. method:: is_symlink() -> bool
 
         Returns whether this entry is a symbolic link.
-
-    .. attribute:: file_name
-        :type: str
-
-        Return the file name of this entry.
-
-        If this entry has no file name (e.g., ``/``), then the full path is
-        returned.
 
     .. attribute:: depth
         :type: int

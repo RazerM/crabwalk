@@ -57,7 +57,7 @@ impl DirEntry {
     }
 
     #[getter]
-    fn file_name(&self) -> &OsStr {
+    fn name(&self) -> &OsStr {
         self.inner.file_name()
     }
 
