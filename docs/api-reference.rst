@@ -158,7 +158,7 @@ API Reference
 
 .. autoclass:: Types
 
-    A collection of
+    A collection of type definitions with selections and negations.
 
     ``Types`` implements the :class:`~collections.abc.MutableMapping` interface.
 
