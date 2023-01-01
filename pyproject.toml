@@ -14,10 +14,10 @@ authors = [
 
 [project.optional-dependencies]
 docs = [
+    "doc8",
     "furo",
     "myst-parser",
     "sphinx",
-    "doc8",
 ]
 test = [
     "pytest",
