@@ -35,32 +35,7 @@ enum State {
     Closed,
 }
 
-#[pyclass(
-    module = "crabwalk",
-    text_signature = "(\
-*paths, \
-max_depth=None, \
-follow_links=False, \
-max_filesize=None, \
-global_ignore_files=None, \
-custom_ignore_filenames=None, \
-overrides=None, \
-types=None, \
-hidden=True, \
-parents=True, \
-ignore=True, \
-git_global=True, \
-git_ignore=True, \
-git_exclude=True, \
-require_git=True, \
-ignore_case_insensitive=False, \
-sort=False, \
-same_file_system=False, \
-skip_stdout=False, \
-filter_entry=None, \
-onerror=None, \
-)"
-)]
+#[pyclass(module = "crabwalk")]
 pub struct Walk {
     state: State,
     paths: Option<Py<PyList>>, // Only None after tp_clear
@@ -89,28 +64,30 @@ pub struct Walk {
 #[pymethods]
 impl Walk {
     #[new]
-    #[args(
-        paths = "*",
-        max_depth = "None",
-        follow_links = "false",
-        max_filesize = "None",
-        global_ignore_files = "None",
-        custom_ignore_filenames = "None",
-        overrides = "None",
-        types = "None",
-        hidden = "true",
-        parents = "true",
-        ignore = "true",
-        git_global = "true",
-        git_ignore = "true",
-        git_exclude = "true",
-        require_git = "true",
-        ignore_case_insensitive = "false",
-        sort = "None",
-        same_file_system = "false",
-        skip_stdout = "false",
-        filter_entry = "None",
-        onerror = "None"
+    #[pyo3(
+        signature = (
+            *paths,
+            max_depth = None,
+            follow_links = false,
+            max_filesize = None,
+            global_ignore_files = None,
+            custom_ignore_filenames = None,
+            overrides = None,
+            types = None,
+            hidden = true,
+            parents = true,
+            ignore = true,
+            git_global = true,
+            git_ignore = true,
+            git_exclude = true,
+            require_git = true,
+            ignore_case_insensitive = false,
+            sort = None,
+            same_file_system = false,
+            skip_stdout = false,
+            filter_entry = None,
+            onerror = None
+        )
     )]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -139,11 +116,11 @@ impl Walk {
     ) -> PyResult<Self> {
         let paths = PyList::new(py, paths);
         let global_ignore_files = match global_ignore_files {
-            Some(seq) => Some(seq.list()?.into_py(py)),
+            Some(seq) => Some(seq.to_list()?.into_py(py)),
             None => Some(PyList::empty(py).into_py(py)),
         };
         let custom_ignore_filenames = match custom_ignore_filenames {
-            Some(seq) => Some(seq.list()?.into_py(py)),
+            Some(seq) => Some(seq.to_list()?.into_py(py)),
             None => Some(PyList::empty(py).into_py(py)),
         };
         let sort = match sort {
@@ -186,7 +163,6 @@ impl Walk {
         Ok(instance)
     }
 
-    #[pyo3(text_signature = "()")]
     fn disable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.hidden = false;
@@ -198,7 +174,6 @@ impl Walk {
         Ok(())
     }
 
-    #[pyo3(text_signature = "()")]
     fn enable_standard_filters(&mut self) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.hidden = true;
@@ -472,7 +447,6 @@ impl Walk {
     /// Close the iterator and free acquired resources
     ///
     /// It is recommended to use a ``with`` statement instead.
-    #[pyo3(text_signature = "()")]
     fn close(&mut self) {
         self.state = State::Closed;
     }

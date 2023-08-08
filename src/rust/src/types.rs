@@ -21,11 +21,7 @@ pub enum Selection {
     Negate(String),
 }
 
-#[pyclass(
-    module = "crabwalk",
-    mapping,
-    text_signature = "(initial=(), /, **kwargs)"
-)]
+#[pyclass(module = "crabwalk", mapping)]
 #[derive(Clone)]
 pub struct Types {
     types: Option<Py<PyDict>>,
@@ -35,14 +31,13 @@ pub struct Types {
 #[pymethods]
 impl Types {
     #[new]
-    // https://github.com/PyO3/pyo3/issues/2799
-    #[args(__initial = "None", "/", kwargs = "**")]
-    fn new(py: Python<'_>, __initial: Option<&PyAny>, kwargs: Option<&PyDict>) -> PyResult<Self> {
+    #[pyo3(signature = (initial=None, /, **kwargs))]
+    fn new(py: Python<'_>, initial: Option<&PyAny>, kwargs: Option<&PyDict>) -> PyResult<Self> {
         let instance = Self {
             types: Some(PyDict::new(py).into_py(py)),
             selections: Vec::new(),
         };
-        instance.update(py, __initial, kwargs)?;
+        instance.update(py, initial, kwargs)?;
         Ok(instance)
     }
 
@@ -52,12 +47,11 @@ impl Types {
             .get_item(name)?
             .downcast::<PyList>()?
             .as_sequence()
-            .tuple()?
+            .to_tuple()?
             .into())
     }
 
-    #[args(key, default = "None", "/")]
-    #[pyo3(text_signature = "(key, default=None, /)")]
+    #[pyo3(signature = (key, default=None, /))]
     pub fn get(&self, py: Python<'_>, key: &PyAny, default: Option<&PyAny>) -> PyResult<PyObject> {
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs.to_object(py)),
@@ -164,11 +158,7 @@ impl Types {
         Ok(())
     }
 
-    // I wanted to do the following, but then pyo3 doesn't pass the default argument
-    // #[args(key, default = "Maybe::Missing", "/")]
-    // #[pyo3(text_signature = "(key, default=<missing>, /)")]
-    #[args(key, "/", default = "Maybe::Missing")]
-    #[pyo3(text_signature = "(key, /, default=<missing>)")]
+    #[pyo3(signature = (key, default=Maybe::Missing, /))]
     pub fn pop(&self, py: Python<'_>, key: &PyAny, default: Maybe<&PyAny>) -> PyResult<PyObject> {
         match self.__getitem__(py, key) {
             Ok(globs) => {
@@ -183,7 +173,6 @@ impl Types {
         }
     }
 
-    #[pyo3(text_signature = "()")]
     pub fn popitem(&self, py: Python<'_>) -> PyResult<(Py<PyString>, Py<PyTuple>)> {
         let (name, globs): (&PyString, &PyList) = self
             .types
@@ -192,24 +181,24 @@ impl Types {
             .as_ref(py)
             .call_method0("popitem")?
             .extract()?;
-        Ok((name.into(), globs.as_sequence().tuple()?.into()))
+        Ok((name.into(), globs.as_sequence().to_tuple()?.into()))
     }
 
-    #[pyo3(text_signature = "()")]
     pub fn clear(&self, py: Python<'_>) {
         self.types.as_ref().unwrap().as_ref(py).clear()
     }
 
-    // https://github.com/PyO3/pyo3/issues/2799
-    #[args(__other = "None", "/", kwargs = "**")]
-    #[pyo3(text_signature = "(other=(), /, **kwargs)")]
+    #[pyo3(
+        signature = (other=None, /, **kwargs),
+        text_signature = "($self, other=(), /, **kwargs)"
+    )]
     pub fn update(
         &self,
         py: Python<'_>,
-        __other: Option<&PyAny>,
+        other: Option<&PyAny>,
         kwargs: Option<&PyDict>,
     ) -> PyResult<()> {
-        let other = __other.unwrap_or_else(|| PyTuple::empty(py));
+        let other = other.unwrap_or_else(|| PyTuple::empty(py));
         if let Ok(other) = other.downcast::<PyMapping>() {
             for name in other.iter()? {
                 let name = name?;
@@ -234,8 +223,10 @@ impl Types {
         Ok(())
     }
 
-    #[args(key, default = "None", "/")]
-    #[pyo3(text_signature = "(key, default=(), /)")]
+    #[pyo3(
+        signature = (key, default=None, /),
+        text_signature = "($self, key, default=(), /)"
+    )]
     pub fn setdefault(
         &self,
         py: Python<'_>,
@@ -247,13 +238,12 @@ impl Types {
             Ok(globs) => Ok(globs),
             Err(err) if err.is_instance(py, py.get_type::<PyKeyError>()) => {
                 self.__setitem__(py, key.extract()?, default)?;
-                Ok(default.tuple()?.into())
+                Ok(default.to_tuple()?.into())
             }
             Err(err) => Err(err),
         }
     }
 
-    #[pyo3(text_signature = "(name, glob)")]
     pub fn add(&self, py: Python<'_>, name: &str, glob: &PyString) -> PyResult<()> {
         lazy_static::lazy_static! {
             static ref RE: Regex = Regex::new(r"^[\pL\pN]+$").unwrap();
@@ -274,7 +264,6 @@ impl Types {
         Ok(())
     }
 
-    #[pyo3(text_signature = "()")]
     pub fn add_defaults(&self, py: Python<'_>) -> PyResult<()> {
         lazy_static::lazy_static! {
             static ref DEFAULT_TYPES: Vec<ignore::types::FileTypeDef> =
@@ -295,7 +284,6 @@ impl Types {
     /// Select the file type given by `name`.
     ///
     /// If `name` is `all`, then all file types currently defined are selected.
-    #[pyo3(text_signature = "(name)")]
     pub fn select(&mut self, py: Python<'_>, name: &str) {
         if name == "all" {
             for name in self.types.as_ref().unwrap().as_ref(py).keys() {
@@ -309,7 +297,6 @@ impl Types {
     /// Ignore the file type given by `name`.
     ///
     /// If `name` is `all`, then all file types currently defined are negated.
-    #[pyo3(text_signature = "(name)")]
     pub fn negate(&mut self, py: Python<'_>, name: &str) {
         if name == "all" {
             for name in self.types.as_ref().unwrap().as_ref(py).keys() {
