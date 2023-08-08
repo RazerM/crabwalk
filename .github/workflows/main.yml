@@ -45,7 +45,7 @@ jobs:
         python:
           - { version: "3.7", toxenv: "py37" }
           - { version: "3.11", toxenv: "py311" }
-        rust-version: ["1.48.0"]
+        rust-version: ["1.63.0"]
 
     steps:
       - uses: "actions/checkout@v3"

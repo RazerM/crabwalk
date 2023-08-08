@@ -497,12 +497,7 @@ impl Walk {
             _ => unreachable!(),
         };
 
-        loop {
-            let dent = match py.allow_threads(|| walk.next()) {
-                Some(dent) => dent,
-                None => break,
-            };
-
+        while let Some(dent) = py.allow_threads(|| walk.next()) {
             if let Some(err) = PyErr::take(py) {
                 // Don't pass user-caused errors through onerror, raise directly
                 return Err(err);
@@ -522,6 +517,12 @@ impl Walk {
                 }
             }
         }
+
+        if let Some(err) = PyErr::take(py) {
+            // Don't pass user-caused errors through onerror, raise directly
+            return Err(err);
+        }
+
         Ok(None)
     }
 

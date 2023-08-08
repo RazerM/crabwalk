@@ -30,7 +30,7 @@ setup(
                 if platform.python_implementation() == "PyPy"
                 else [f"pyo3/abi3-py{ABI_VERSION}"]
             ),
-            rust_version=">=1.48.0",
+            rust_version=">=1.63.0",
         )
     ],
     cmdclass={"bdist_wheel": bdist_wheel_abi3},
