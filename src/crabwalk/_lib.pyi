@@ -114,7 +114,7 @@ class Walk:
     git_exclude: bool
     require_git: bool
     ignore_case_insensitive: bool
-    sort: Callable[[DirEntry], bool] | bool
+    sort: Callable[[str], SupportsRichComparison] | bool
     same_file_system: bool
     skip_stdout: bool
     filter_entry: Callable[[DirEntry], bool] | None
