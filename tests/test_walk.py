@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from typing import Callable, Iterator, List
+from unittest.mock import Mock
 
 import pytest
 
@@ -319,3 +320,25 @@ def test_ignore_case_insensitive(
 ) -> None:
     walk = Walk("root", ignore_case_insensitive=ignore_case_insensitive, sort=True)
     assert list(walk_paths(walk)) == paths
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+    ),
+    chdir=True,
+)
+def test_sort_function(
+    tree_path: Path,
+    walk_paths: WalkPaths,
+) -> None:
+    def sort(path: str) -> str:
+        return path
+
+    mock_sort = Mock(wraps=sort)
+    walk = Walk("root", sort=mock_sort)
+    assert walk.sort == mock_sort
+    assert list(walk_paths(walk)) == ["root", "root/a", "root/b"]
+    assert {args[0] for _, args, _ in mock_sort.mock_calls} == {"root/a", "root/b"}
