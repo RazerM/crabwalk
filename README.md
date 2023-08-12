@@ -8,7 +8,7 @@
     <a href="https://github.com/RazerM/crabwalk/actions?workflow=CI">
         <img src="https://github.com/RazerM/crabwalk/workflows/CI/badge.svg?branch=main" alt="CI Status" />
     </a>
-    <a href="https://raw.githubusercontent.com/RazerM/crabwalk/master/LICENSE">
+    <a href="https://raw.githubusercontent.com/RazerM/crabwalk/main/LICENSE">
         <img src="https://img.shields.io/github/license/RazerM/crabwalk.svg" alt="MIT License" />
     </a>
 </p>
