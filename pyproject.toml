@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "crabwalk"
 version = "0.1"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = { text = "MIT" }
 dependencies = []
 authors = [
