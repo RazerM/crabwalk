@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "setuptools-rust", "wheel"]
+requires = ["setuptools", "setuptools-rust>=1.7.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -31,6 +31,12 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["crabwalk"]
+
+[[tool.setuptools-rust.ext-modules]]
+target = "crabwalk._lib"
+path = "src/rust/Cargo.toml"
+py-limited-api = true
+rust-version = ">=1.63.0"
 
 [tool.isort]
 profile = "black"
