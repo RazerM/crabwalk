@@ -23,6 +23,7 @@ jobs:
       CIBW_SKIP: "*-musllinux_i686 pp*-win_amd64"
       CIBW_ARCHS_MACOS: "auto universal2"
       CIBW_ARCHS_LINUX: "auto aarch64"
+      CIBW_CONFIG_SETTINGS: "--build-option=--py-limited-api=cp37"
 
     steps:
       - uses: actions/checkout@v3
