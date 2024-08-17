@@ -144,7 +144,7 @@ impl Types {
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        PyIterator::from_object(py, self.types.as_ref().unwrap().as_ref(py)).map(Into::into)
+        PyIterator::from_object(self.types.as_ref().unwrap().as_ref(py)).map(Into::into)
     }
 
     pub fn __delitem__(&self, py: Python<'_>, name: &PyAny) -> PyResult<()> {
@@ -252,7 +252,7 @@ impl Types {
             return Err(ignore::Error::InvalidDefinition.into_py_err(py));
         }
         let types = self.types.as_ref().unwrap().as_ref(py);
-        let globs: &PyList = match types.get_item(name) {
+        let globs: &PyList = match types.get_item(name)? {
             Some(globs) => globs.downcast()?,
             None => {
                 let globs = PyList::empty(py);
