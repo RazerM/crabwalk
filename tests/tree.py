@@ -18,8 +18,7 @@ StrPath: TypeAlias = "Union[str, os.PathLike[str]]"
 
 
 class FsItem(Protocol):
-    def create(self, path: StrPath) -> None:
-        ...
+    def create(self, path: StrPath) -> None: ...
 
 
 class Directory:
