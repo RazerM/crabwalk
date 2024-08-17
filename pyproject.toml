@@ -35,7 +35,7 @@ include = ["crabwalk"]
 [[tool.setuptools-rust.ext-modules]]
 target = "crabwalk._lib"
 path = "src/rust/Cargo.toml"
-py-limited-api = true
+py-limited-api = "auto"
 rust-version = ">=1.63.0"
 
 [tool.isort]
