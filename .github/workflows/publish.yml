@@ -26,7 +26,7 @@ jobs:
       CIBW_CONFIG_SETTINGS: "--build-option=--py-limited-api=cp38"
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Limit build to certain wheels as a test since this is not a release
         if: github.event_name == 'pull_request' && runner.os != 'Windows'
@@ -55,7 +55,7 @@ jobs:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         name: Install Python
