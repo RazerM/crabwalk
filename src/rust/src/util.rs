@@ -2,7 +2,7 @@ use std::ffi::OsString;
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use pyo3::{ffi, AsPyPointer};
+use pyo3::ffi;
 
 pub fn fspath(path: &PyAny) -> PyResult<&PyAny> {
     let py = path.py();

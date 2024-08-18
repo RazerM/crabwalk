@@ -2,24 +2,18 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Union
+from typing import List, Protocol, Union
 
 if sys.version_info >= (3, 10):
     from typing import TypeAlias
 else:
     from typing_extensions import TypeAlias
 
-if sys.version_info >= (3, 8):
-    from typing import Protocol
-else:
-    from typing_extensions import Protocol
-
 StrPath: TypeAlias = "Union[str, os.PathLike[str]]"
 
 
 class FsItem(Protocol):
-    def create(self, path: StrPath) -> None:
-        ...
+    def create(self, path: StrPath) -> None: ...
 
 
 class Directory:

@@ -187,12 +187,10 @@ class Overrides(MutableSequence[OverrideT]):
         return self._path
 
     @overload
-    def __getitem__(self, index: int) -> Override:
-        ...
+    def __getitem__(self, index: int) -> Override: ...
 
     @overload
-    def __getitem__(self, index: slice) -> "Overrides":
-        ...
+    def __getitem__(self, index: slice) -> "Overrides": ...
 
     def __getitem__(self, index: Union[int, slice]) -> "Union[Override, Overrides]":
         if isinstance(index, slice):
@@ -201,12 +199,10 @@ class Overrides(MutableSequence[OverrideT]):
             return self._overrides[index]
 
     @overload
-    def __setitem__(self, index: int, value: OverrideT) -> None:
-        ...
+    def __setitem__(self, index: int, value: OverrideT) -> None: ...
 
     @overload
-    def __setitem__(self, index: slice, value: Iterable[OverrideT]) -> None:
-        ...
+    def __setitem__(self, index: slice, value: Iterable[OverrideT]) -> None: ...
 
     def __setitem__(
         self, index: Union[int, slice], value: Union[OverrideT, Iterable[OverrideT]]
@@ -217,12 +213,10 @@ class Overrides(MutableSequence[OverrideT]):
             self._overrides[index] = coerce_override(value)
 
     @overload
-    def __delitem__(self, index: int) -> None:
-        ...
+    def __delitem__(self, index: int) -> None: ...
 
     @overload
-    def __delitem__(self, index: slice) -> None:
-        ...
+    def __delitem__(self, index: slice) -> None: ...
 
     def __delitem__(self, index: Union[int, slice]) -> None:
         del self._overrides[index]
