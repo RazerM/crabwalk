@@ -3,3 +3,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.admonition.stdlib-difference {
+  border-color: rgb(255, 197, 18);
+}
+
+.admonition.stdlib-difference > .admonition-title {
+  background-color: rgba(255, 197, 18, 0.1);
+  border-color: rgb(255, 197, 18);
+}
+
+.admonition.stdlib-difference > .admonition-title::before {
+  background-color: rgb(255, 197, 18);
+  -webkit-mask-image: var(--icon-spark);
+  mask-image: var(--icon-spark);
+}
