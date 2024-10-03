@@ -207,6 +207,22 @@ API Reference
 
     ``Types`` implements the :class:`~collections.abc.MutableMapping` interface.
 
+    Typical usage:
+
+    .. code-block:: python
+
+        types = Types()
+        types.add_defaults()
+        types.select("...")
+        types.negate("...")
+
+        with Walk(..., types=types) as walk:
+            ...
+
+    .. note::
+
+        A :class:`Types` instance without any selections or negations won't affect the output of :class:`Walk`.
+
     .. method:: add(name: str, glob: str) -> None
 
         Add ``glob`` to type with name ``name``.
