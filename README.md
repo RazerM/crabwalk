@@ -2,7 +2,7 @@
     <a href="https://pypi.org/project/crabwalk/">
         <img src="https://img.shields.io/pypi/v/crabwalk.svg" alt="PyPI" />
     </a>
-    <a href="https://crabwalk.readthedocs.io/en/latest/">
+    <a href="https://crabwalk.readthedocs.io/en/stable/">
         <img src="https://img.shields.io/badge/docs-read%20now-blue.svg" alt="Documentation" />
     </a>
     <a href="https://github.com/RazerM/crabwalk/actions?workflow=CI">
