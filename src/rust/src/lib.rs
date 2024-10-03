@@ -27,6 +27,7 @@ static TYPES_MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
 static KEYS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
 static ITEMS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
 static VALUES_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
+static OS_STAT: GILOnceCell<PyObject> = GILOnceCell::new();
 
 enum State {
     Unopened,
@@ -40,7 +41,7 @@ pub struct Walk {
     state: State,
     paths: Option<Py<PyList>>, // Only None after tp_clear
     max_depth: Option<usize>,
-    follow_links: bool,
+    follow_symlinks: bool,
     max_filesize: Option<u64>,
     global_ignore_files: Option<Py<PyList>>, // Only None after tp_clear
     custom_ignore_filenames: Option<Py<PyList>>, // Only None after tp_clear
@@ -68,7 +69,7 @@ impl Walk {
         signature = (
             *paths,
             max_depth = None,
-            follow_links = false,
+            follow_symlinks = false,
             max_filesize = None,
             global_ignore_files = None,
             custom_ignore_filenames = None,
@@ -94,7 +95,7 @@ impl Walk {
         py: Python<'_>,
         paths: &PyTuple,
         max_depth: Option<usize>,
-        follow_links: bool,
+        follow_symlinks: bool,
         max_filesize: Option<u64>,
         global_ignore_files: Option<&PySequence>,
         custom_ignore_filenames: Option<&PySequence>,
@@ -137,7 +138,7 @@ impl Walk {
             state: State::Unopened,
             paths: Some(paths.into_py(py)),
             max_depth,
-            follow_links,
+            follow_symlinks,
             max_filesize,
             global_ignore_files,
             custom_ignore_filenames,
@@ -203,14 +204,14 @@ impl Walk {
     }
 
     #[getter]
-    fn follow_links(&self) -> bool {
-        self.follow_links
+    fn follow_symlinks(&self) -> bool {
+        self.follow_symlinks
     }
 
     #[setter]
-    fn set_follow_links(&mut self, value: bool) -> PyResult<()> {
+    fn set_follow_symlinks(&mut self, value: bool) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.follow_links = value;
+        self.follow_symlinks = value;
         Ok(())
     }
 
@@ -453,7 +454,7 @@ impl Walk {
 
     fn __exit__(
         &mut self,
-        _exc_typepe: Option<&PyType>,
+        _exc_type: Option<&PyType>,
         _exc_val: Option<&PyException>,
         _exc_tb: Option<&PyTraceback>,
     ) {
@@ -482,7 +483,7 @@ impl Walk {
                     if let Some(err) = dent.error() {
                         self.convert_and_call_onerror(py, err.clone())?;
                     }
-                    return Ok(Some(DirEntry::new(dent, self.follow_links)));
+                    return Ok(Some(DirEntry::new(dent, self.follow_symlinks)));
                 }
                 Err(err) => {
                     if let Some(onerror) = self.onerror.clone() {
@@ -577,7 +578,7 @@ impl Walk {
 
         builder
             .max_depth(self.max_depth)
-            .follow_links(self.follow_links)
+            .follow_links(self.follow_symlinks)
             .max_filesize(self.max_filesize)
             .hidden(self.hidden)
             .parents(self.parents)
@@ -607,9 +608,9 @@ impl Walk {
         }
 
         if let Some(filter_entry) = self.filter_entry.clone() {
-            let follow_links = self.follow_links;
+            let follow_symlinks = self.follow_symlinks;
             builder.filter_entry(move |dent| {
-                let py_dent = DirEntry::new(dent.clone(), follow_links);
+                let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
                 Python::with_gil(|py| {
                     filter_entry
                         .call1(py, (py_dent,))
@@ -793,21 +794,23 @@ fn _lib(py: Python<'_>, m: &PyModule) -> PyResult<()> {
 
     let collections_abc_mod = py.import("collections.abc")?;
 
-    let keys_view_typepe = collections_abc_mod
+    let keys_view_type = collections_abc_mod
         .getattr("KeysView")?
         .downcast::<PyType>()?;
 
-    let items_view_typepe = collections_abc_mod
+    let items_view_type = collections_abc_mod
         .getattr("ItemsView")?
         .downcast::<PyType>()?;
 
-    let values_view_typepe = collections_abc_mod
+    let values_view_type = collections_abc_mod
         .getattr("ValuesView")?
         .downcast::<PyType>()?;
 
-    let _ = KEYS_VIEW_TYPE.set(py, keys_view_typepe.into_py(py));
-    let _ = ITEMS_VIEW_TYPE.set(py, items_view_typepe.into_py(py));
-    let _ = VALUES_VIEW_TYPE.set(py, values_view_typepe.into_py(py));
+    let _ = KEYS_VIEW_TYPE.set(py, keys_view_type.into());
+    let _ = ITEMS_VIEW_TYPE.set(py, items_view_type.into());
+    let _ = VALUES_VIEW_TYPE.set(py, values_view_type.into());
+
+    let _ = OS_STAT.set(py, py.import("os")?.getattr("stat")?.into());
 
     Ok(())
 }

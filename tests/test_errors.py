@@ -27,7 +27,7 @@ def test_loop(tmp_path: Path) -> None:
     os.symlink(ancestor, child, target_is_directory=True)
 
     with pytest.raises(LoopError) as exc_info:
-        with Walk(tmp_path, follow_links=True, onerror=raise_error) as walk:
+        with Walk(tmp_path, follow_symlinks=True, onerror=raise_error) as walk:
             for entry in walk:
                 print(entry)
 

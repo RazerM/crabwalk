@@ -15,8 +15,8 @@ API Reference
     :type paths: typing.Union[str, os.PathLike[str]]
     :param max_depth: The maximum depth to recurse.
     :type max_depth: typing.Optional[int]
-    :param follow_links: Whether to follow symbolic links or not.
-    :type follow_links: bool
+    :param follow_symlinks: Whether to follow symbolic links or not.
+    :type follow_symlinks: bool
     :param max_filesize: Whether to ignore files above the specified limit.
     :type max_filesize: typing.Optional[int]
     :param global_ignore_files: Paths to global ignore files. These have lower
@@ -113,8 +113,11 @@ API Reference
 
         Return the base filename of this entry.
 
-        If this entry has no file name (e.g., ``/``), then the full path is
-        returned.
+        .. admonition:: ``os.DirEntry`` difference
+            :class: stdlib-difference
+
+            If this entry has no file name (e.g., ``/``), then the full path is
+            returned.
 
     .. attribute:: path
         :type: str
@@ -126,13 +129,17 @@ API Reference
 
         Return the inode number of the entry.
 
-        .. caution:: If ``follow_links=True`` and this entry is a symbolic link,
-            the inode number of the target is returned. This is different from
-            :class:`os.DirEntry` which always returns the inode number of the
-            symbolic link itself.
+        If ``follow_symlinks=True`` and this entry is a symbolic link, the inode
+        number of the target is returned.
 
-            Use ``os.stat(entry.path, follow_symlinks=False).st_ino``
-            if that's what you want.
+        .. admonition:: ``os.DirEntry`` difference
+            :class: stdlib-difference
+
+            In contrast, :class:`os.DirEntry` always returns the inode number of
+            the symbolic link itself.
+
+            Use ``os.stat(entry, follow_symlinks=False).st_ino`` if that's what
+            you want.
 
         On the first, uncached call, a system call is required on Windows but
         not on Unix.
@@ -140,21 +147,59 @@ API Reference
     .. method:: is_dir() -> bool
 
         Returns whether this entry is a directory or if :class:`Walk` was
-        configured with ``follow_links=True`` and this is a symbolic link
+        configured with ``follow_symlinks=True`` and this is a symbolic link
         pointing to a directory.
+
+        Never makes any system calls.
+
+        .. admonition:: ``os.DirEntry`` difference
+            :class: stdlib-difference
+
+            There is no ``follow_symlinks`` argument, as it is configured
+            via :class:`Walk`.
+
     .. method:: is_file() -> bool
 
         Returns whether this entry is a file or if :class:`Walk` was
-        configured with ``follow_links=True`` and this is a symbolic link
+        configured with ``follow_symlinks=True`` and this is a symbolic link
         pointing to a file.
+
+        Never makes any system calls.
+
+        .. admonition:: ``os.DirEntry`` difference
+            :class: stdlib-difference
+
+            There is no ``follow_symlinks`` argument, as it is configured
+            via :class:`Walk`.
+
     .. method:: is_symlink() -> bool
 
         Returns whether this entry is a symbolic link.
+
+    .. method:: stat() -> os.stat_result
+
+        Returns a :class:`~os.stat_result` object for this entry. Follows
+        symbolic links if :class:`Walk` was configured with
+        ``follow_symlinks=True``.
+
+        Always makes a system call.
+
+        .. admonition:: ``os.DirEntry`` difference
+            :class: stdlib-difference
+
+            There is no ``follow_symlinks`` argument, as it is configured
+            via :class:`Walk`.
 
     .. attribute:: depth
         :type: int
 
         The depth at which this entry was created relative to the root.
+
+    .. attribute:: follow_symlinks
+        :type: bool
+
+        Whether this entry is configured to follow symlinks or not (inherited
+        from the :class:`Walk` instance which yielded it).
 
 .. autoclass:: Types
 

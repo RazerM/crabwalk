@@ -28,14 +28,16 @@ class SupportsKeysAndGetItem(Protocol[KT, VT_co]):
 
 @final
 class DirEntry:
+    name: str
     path: str
     def inode(self) -> int: ...
     def is_dir(self) -> bool: ...
     def is_file(self) -> bool: ...
     def is_symlink(self) -> bool: ...
-    name: str
-    depth: int
+    def stat(self) -> os.stat_result: ...
     def __fspath__(self) -> str: ...
+    depth: int
+    follow_symlinks: bool
 
 VIn: TypeAlias = Sequence[str]
 VOut: TypeAlias = tuple[str, ...]
@@ -73,7 +75,7 @@ class Walk:
         cls,
         *paths: StrPath,
         max_depth: int | None = ...,
-        follow_links: bool = ...,
+        follow_symlinks: bool = ...,
         max_filesize: int | None = ...,
         global_ignore_files: Sequence[StrPath] | None = ...,
         custom_ignore_filenames: Sequence[str] | None = ...,
@@ -98,7 +100,7 @@ class Walk:
     @property
     def paths(self) -> list[StrPath]: ...
     max_depth: int | None
-    follow_links: bool
+    follow_symlinks: bool
     max_filesize: int | None
     @property
     def global_ignore_files(self) -> list[StrPath]: ...

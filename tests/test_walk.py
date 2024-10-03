@@ -76,8 +76,8 @@ def test_max_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
     ),
     chdir=True,
 )
-def test_follow_links(tree_path: Path, walk_paths: WalkPaths) -> None:
-    walk = Walk("root", follow_links=True, sort=True)
+def test_follow_symlinks(tree_path: Path, walk_paths: WalkPaths) -> None:
+    walk = Walk("root", follow_symlinks=True, sort=True)
     assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
 
 

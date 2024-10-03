@@ -2,22 +2,25 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use pyo3::prelude::*;
-#[cfg(not(unix))] use pyo3::types::IntoPyDict;
+use pyo3::types::IntoPyDict;
+use pyo3::{PyTraverseError, PyVisit};
+
+use crate::OS_STAT;
 
 #[pyclass(module = "crabwalk")]
 pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
-    #[cfg(not(unix))] follow_links: bool,
-    #[cfg(not(unix))] file_index: Option<u64>
+    #[pyo3(get)]
+    follow_symlinks: bool,
+    stat: Option<PyObject>,
 }
 
 impl DirEntry {
-    #[cfg_attr(unix, allow(unused_variables))]
-    pub(crate) fn new(dir_entry: ignore::DirEntry, follow_links: bool) -> Self {
+    pub(crate) fn new(dir_entry: ignore::DirEntry, follow_symlinks: bool) -> Self {
         Self {
             inner: dir_entry,
-            #[cfg(not(unix))] follow_links,
-            #[cfg(not(unix))] file_index: None,
+            follow_symlinks,
+            stat: None,
         }
     }
 }
@@ -43,19 +46,7 @@ impl DirEntry {
 
     #[cfg(not(unix))]
     fn inode(&mut self, py: Python<'_>) -> PyResult<u64> {
-        match self.file_index {
-            Some(file_index) => Ok(file_index),
-            None => {
-                let kwargs = [("follow_symlinks", self.follow_links)];
-                let file_index = py.import("os")?
-                    .getattr("stat")?
-                    .call((self.inner.path(),), Some(kwargs.into_py_dict(py)))?
-                    .getattr("st_ino")?
-                    .extract()?;
-                self.file_index = Some(file_index);
-                Ok(file_index)
-            }
-        }
+        Ok(self.stat(py)?.getattr(py, "st_ino")?.extract(py)?)
     }
 
     fn is_dir(&self) -> bool {
@@ -88,5 +79,32 @@ impl DirEntry {
 
     fn __fspath__(&self) -> &Path {
         self.inner.path()
+    }
+
+    fn stat(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        match &self.stat {
+            Some(stat) => Ok(stat.clone_ref(py)),
+            None => {
+                let kwargs = [("follow_symlinks", self.follow_symlinks)];
+                let stat = OS_STAT
+                    .get(py)
+                    .unwrap()
+                    .as_ref(py)
+                    .call((self.inner.path(),), Some(kwargs.into_py_dict(py)))?;
+                self.stat = Some(stat.into());
+                Ok(stat.into())
+            }
+        }
+    }
+
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        if let Some(stat) = &self.stat {
+            visit.call(stat)?;
+        }
+        Ok(())
+    }
+
+    fn __clear__(&mut self) {
+        self.stat = None;
     }
 }
