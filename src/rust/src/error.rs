@@ -9,7 +9,7 @@ pub trait IntoPyErr {
 
 impl IntoPyErr for ignore::Error {
     fn into_py_err(self, py: Python<'_>) -> PyErr {
-        let types_mod = TYPES_MODULE.get(py).unwrap().as_ref(py);
+        let types_mod = TYPES_MODULE.get(py).unwrap().bind(py);
         match self {
             ignore::Error::Io(err) => err.into(),
             ignore::Error::Glob { err, glob } => {
@@ -18,9 +18,9 @@ impl IntoPyErr for ignore::Error {
                     Ok(error_type) => error_type,
                 };
                 let kwargs = [("glob", glob.into_py(py))];
-                match loop_error_type.call((err,), Some(kwargs.into_py_dict(py))) {
+                match loop_error_type.call((err,), Some(&kwargs.into_py_dict_bound(py))) {
                     Err(err) => err,
-                    Ok(err) => PyErr::from_value(err),
+                    Ok(err) => PyErr::from_value_bound(err),
                 }
             }
             ignore::Error::Loop { ancestor, child } => {
@@ -29,9 +29,9 @@ impl IntoPyErr for ignore::Error {
                     Ok(error_type) => error_type,
                 };
                 let kwargs = [("ancestor", ancestor), ("child", child)];
-                match loop_error_type.call((), Some(kwargs.into_py_dict(py))) {
+                match loop_error_type.call((), Some(&kwargs.into_py_dict_bound(py))) {
                     Err(err) => err,
-                    Ok(err) => PyErr::from_value(err),
+                    Ok(err) => PyErr::from_value_bound(err),
                 }
             }
             ignore::Error::WithDepth { err, depth } => {
@@ -41,7 +41,7 @@ impl IntoPyErr for ignore::Error {
                     if let Err(seterr) = value.setattr(py, "depth", depth) {
                         return seterr;
                     }
-                    PyErr::from_value(value.extract(py).unwrap())
+                    PyErr::from_value_bound(value.extract(py).unwrap())
                 })
             }
             ignore::Error::WithLineNumber { err, line } => {
@@ -51,7 +51,7 @@ impl IntoPyErr for ignore::Error {
                     if let Err(seterr) = value.setattr(py, "line", line) {
                         return seterr;
                     }
-                    PyErr::from_value(value.extract(py).unwrap())
+                    PyErr::from_value_bound(value.extract(py).unwrap())
                 })
             }
             ignore::Error::WithPath { err, path } => {
@@ -61,7 +61,7 @@ impl IntoPyErr for ignore::Error {
                     if let Err(seterr) = value.setattr(py, "path", path) {
                         return seterr;
                     }
-                    PyErr::from_value(value.extract(py).unwrap())
+                    PyErr::from_value_bound(value.extract(py).unwrap())
                 })
             }
             ignore::Error::Partial(errors) => {
@@ -73,7 +73,7 @@ impl IntoPyErr for ignore::Error {
                     errors.into_iter().map(|err| err.into_py_err(py)).collect();
                 match partial_error_type.call1((py_errors,)) {
                     Err(err) => err,
-                    Ok(err) => PyErr::from_value(err),
+                    Ok(err) => PyErr::from_value_bound(err),
                 }
             }
             ignore::Error::InvalidDefinition => {
@@ -83,7 +83,7 @@ impl IntoPyErr for ignore::Error {
                 };
                 match invalid_definition_type.call0() {
                     Err(err) => err,
-                    Ok(err) => PyErr::from_value(err),
+                    Ok(err) => PyErr::from_value_bound(err),
                 }
             }
             ignore::Error::UnrecognizedFileType(name) => {
@@ -92,9 +92,9 @@ impl IntoPyErr for ignore::Error {
                     Ok(error_type) => error_type,
                 };
                 let kwargs = [("name", name)];
-                match unrecognized_file_type.call((), Some(kwargs.into_py_dict(py))) {
+                match unrecognized_file_type.call((), Some(&kwargs.into_py_dict_bound(py))) {
                     Err(err) => err,
-                    Ok(err) => PyErr::from_value(err),
+                    Ok(err) => PyErr::from_value_bound(err),
                 }
             }
         }
