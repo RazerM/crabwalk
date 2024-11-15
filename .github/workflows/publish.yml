@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, windows-2019, macos-12]
+        os: [ubuntu-20.04, windows-2019, macos-13]
 
     env:
       CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y"
@@ -23,7 +23,7 @@ jobs:
       CIBW_SKIP: "*-musllinux_i686 pp*-win_amd64"
       CIBW_ARCHS_MACOS: "auto universal2"
       CIBW_ARCHS_LINUX: "auto aarch64"
-      CIBW_CONFIG_SETTINGS: "--build-option=--py-limited-api=cp38"
+      CIBW_CONFIG_SETTINGS: "--build-option=--py-limited-api=cp39"
 
     steps:
       - uses: actions/checkout@v4
@@ -31,12 +31,12 @@ jobs:
       - name: Limit build to certain wheels as a test since this is not a release
         if: github.event_name == 'pull_request' && runner.os != 'Windows'
         run: |
-          echo 'CIBW_BUILD=cp38-* pp38-*' >> $GITHUB_ENV
+          echo 'CIBW_BUILD=cp39-* pp39-*' >> $GITHUB_ENV
           echo "CIBW_ARCHS_LINUX=auto" >> $GITHUB_ENV
 
       - name: Limit build to certain wheels as a test since this is not a release
         if: github.event_name == 'pull_request' && runner.os == 'Windows'
-        run: echo 'CIBW_BUILD=cp38-* pp38-*' >> $env:GITHUB_ENV
+        run: echo 'CIBW_BUILD=cp39-* pp39-*' >> $env:GITHUB_ENV
 
       - name: Set up QEMU
         if: runner.os == 'Linux'

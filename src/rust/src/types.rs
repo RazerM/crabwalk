@@ -231,12 +231,12 @@ impl Types {
         if let Ok(other) = other.downcast::<PyMapping>() {
             for name in other.iter()? {
                 let name = &name?;
-                self.__setitem__(py, name.extract()?, other.get_item(name)?.downcast()?)?;
+                self.__setitem__(py, &*name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
             }
         } else if other.hasattr("keys")? {
             for name in other.call_method0("keys")?.iter()? {
                 let name = &name?;
-                self.__setitem__(py, name.extract()?, other.get_item(name)?.downcast()?)?;
+                self.__setitem__(py, &*name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
             }
         } else {
             for item in other.iter()? {
@@ -246,7 +246,7 @@ impl Types {
         }
         if let Some(kwargs) = kwargs {
             for (name, globs) in kwargs.iter() {
-                self.__setitem__(py, name.extract()?, &globs.extract()?)?;
+                self.__setitem__(py, &*name.extract::<PyBackedStr>()?, &globs.extract()?)?;
             }
         }
         Ok(())
@@ -266,7 +266,7 @@ impl Types {
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs),
             Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => {
-                self.__setitem__(py, key.extract()?, &default)?;
+                self.__setitem__(py, &*key.extract::<PyBackedStr>()?, &default)?;
                 Ok(default.to_tuple()?)
             }
             Err(err) => Err(err),

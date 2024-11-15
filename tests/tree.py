@@ -2,7 +2,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Protocol, Union
+from typing import Protocol, Union
 
 if sys.version_info >= (3, 10):
     from typing import TypeAlias
@@ -18,7 +18,7 @@ class FsItem(Protocol):
 
 class Directory:
     name: str
-    children: "List[FsItem]"
+    children: list["FsItem"]
 
     def __init__(self, name: str, *children: "FsItem") -> None:
         self.name = name

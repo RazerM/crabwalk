@@ -1,6 +1,5 @@
 from operator import methodcaller
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -8,7 +7,7 @@ from .tree import FsItem, StrPath
 
 
 class Tree:
-    children: List[FsItem]
+    children: list[FsItem]
     chdir: bool
 
     def __init__(self, *children: FsItem, chdir: bool = False) -> None:

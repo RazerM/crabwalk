@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools", "setuptools-rust>=1.7.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1,<2"]
+build-backend = "maturin"
 
 [project]
 name = "crabwalk"
 version = "0.1"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = []
 authors = [
@@ -20,23 +20,19 @@ docs = [
     "sphinx",
 ]
 test = [
+    "coverage[toml]",
     "pytest",
     "typing_extensions; python_version<'3.10'",
 ]
 
-[tool.setuptools]
-zip-safe = false
-package-dir = { "" = "src" }
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["crabwalk"]
-
-[[tool.setuptools-rust.ext-modules]]
-target = "crabwalk._lib"
-path = "src/rust/Cargo.toml"
-py-limited-api = "auto"
-rust-version = ">=1.63.0"
+[tool.maturin]
+python-source = "src"
+python-packages = ["crabwalk"]
+manifest-path = "src/rust/Cargo.toml"
+module-name = "crabwalk._lib"
+locked = true
+sdist-generator = "git"
+features = ["pyo3/abi3-py39"]
 
 [tool.isort]
 profile = "black"
@@ -68,4 +64,21 @@ markers = [
     """tree(*children, chdir=False): Configure the tree_path fixture to create \
     this directory structure.\
     """,
+]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["crabwalk", "tests/"]
+parallel = true
+
+[tool.coverage.paths]
+crabwalk = [
+    "src/crabwalk",
+    "*.nox/*/lib*/python*/site-packages/crabwalk",
+    "*.nox\\*\\Lib\\site-packages\\crabwalk",
+]
+tests = [
+    "tests/",
+    "tests\\",
 ]
