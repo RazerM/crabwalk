@@ -12,17 +12,29 @@ authors = [
     { name = "Frazer McLean", email = "frazer@frazermclean.co.uk" }
 ]
 
-[project.optional-dependencies]
-docs = [
-    "doc8",
-    "furo",
-    "myst-parser",
-    "sphinx",
+[dependency-groups]
+dev = [
+    { include-group = "coverage" },
+    "pytest>=8.3.3",
+    "typing-extensions>=4.12.2; python_version<'3.10'",
 ]
-test = [
-    "coverage[toml]",
-    "pytest",
-    "typing_extensions; python_version<'3.10'",
+docs = [
+    "furo>=2024.8.6",
+    "myst-parser>=3.0.1",
+    "sphinx>=7.4.7",
+]
+docstest = [
+    { include-group = "docs" },
+    "doc8>=1.1.2",
+]
+typing = [
+    "mypy>=1.13.0",
+]
+coverage = [
+    "coverage[toml]>=7.6.5",
+]
+nox = [
+    "nox>=2024.10.9",
 ]
 
 [tool.maturin]
@@ -81,4 +93,14 @@ crabwalk = [
 tests = [
     "tests/",
     "tests\\",
+]
+
+[tool.uv]
+# Lock latest versions for each Python version
+environments = [
+    "python_version>='3.13'",
+    "python_version=='3.12'",
+    "python_version=='3.11'",
+    "python_version=='3.10'",
+    "python_version=='3.9'",
 ]

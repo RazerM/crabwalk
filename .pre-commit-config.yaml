@@ -30,3 +30,13 @@ repos:
     hooks:
       - id: blacken-docs
         additional_dependencies: [black==24.8.0]
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.5.2
+    hooks:
+      - id: uv-export
+        args:
+          - --frozen
+          - --no-dev
+          - --group=docs
+          - --no-emit-project
+          - --output-file=docs/requirements.txt

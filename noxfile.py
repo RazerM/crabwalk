@@ -15,21 +15,30 @@ nox.options.reuse_existing_virtualenvs = True
 nox.options.default_venv_backend = "uv"
 
 
-def install(session: nox.Session, *args: str, verbose: bool = True) -> None:
-    if verbose:
-        args += ("-v",)
-    session.install(*args, silent=False)
-
-
 @nox.session(python="3.13")
 def typing(session: nox.Session) -> None:
-    install(session, ".[test]", "mypy")
+    session.run_install(
+        "uv",
+        "sync",
+        "--no-editable",
+        "--group=typing",
+        "--reinstall-package=crabwalk",
+        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
+    )
     session.run("mypy", "src/crabwalk", "tests")
 
 
 @nox.session(python="3.13")
 def docs(session: nox.Session) -> None:
-    install(session, ".[docs]", "--reinstall-package=crabwalk")
+    session.run_install(
+        "uv",
+        "sync",
+        "--no-editable",
+        "--no-dev",
+        "--group=docstest",
+        "--reinstall-package=crabwalk",
+        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
+    )
 
     temp_dir = session.create_tmp()
     session.run(
@@ -66,7 +75,13 @@ def tests(session: nox.Session) -> None:
             "LLVM_PROFILE_FILE": str(prof_location / "cov-%p.profraw"),
         }
     )
-    install(session, ".[test]", "--reinstall-package=crabwalk")
+    session.run_install(
+        "uv",
+        "sync",
+        "--no-editable",
+        "--reinstall-package=crabwalk",
+        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
+    )
 
     if session.posargs:
         tests = session.posargs
@@ -86,7 +101,6 @@ def tests(session: nox.Session) -> None:
         recursive=True,
     )
     [rust_so] = (lib for lib in libs if not lib.endswith(".pyi"))
-    print(rust_so)
     process_rust_coverage(session, [rust_so], prof_location)
 
 

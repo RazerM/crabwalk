@@ -8,6 +8,9 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+env:
+  UV_NO_SYNC: "1"
+
 jobs:
   tests:
     name: "Python ${{ matrix.python-version }}"
@@ -32,14 +35,13 @@ jobs:
           rustc --version
           python -m site
           uv --version
-          uv tool install nox
-          uv tool install 'coverage[toml]'
+          uv sync --no-install-project --no-dev --group nox --group coverage
       - name: "Run nox targets for ${{ matrix.python-version }}"
-        run: "nox --python ${{ matrix.python-version }}"
+        run: "uv run nox --python ${{ matrix.python-version }}"
       - name: "Convert coverage"
         run: |
-          coverage combine
-          coverage xml
+          uv run coverage combine
+          uv run coverage xml
       - name: "Upload coverage to Codecov"
         uses: codecov/codecov-action@v4
         with:
@@ -73,6 +75,6 @@ jobs:
           rustc --version
           python -m site
           uv --version
-          uv tool install nox
+          uv sync --no-install-project --no-dev --group nox
       - name: "Run nox"
-        run: "nox --python ${{ matrix.python-version }} -e tests"
+        run: "uv run nox --python ${{ matrix.python-version }} -e tests"
