@@ -1,17 +1,7 @@
 import os
 import sys
-from typing import (
-    Iterable,
-    Iterator,
-    List,
-    MutableSequence,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-    overload,
-)
+from collections.abc import Iterable, Iterator, MutableSequence, Sequence
+from typing import NamedTuple, Optional, Union, overload
 
 
 def _display(s: str) -> str:
@@ -31,7 +21,7 @@ class WalkError(Exception):
         self.path = path
         self.depth = depth
 
-    def __reduce__(self) -> Tuple[object, ...]:
+    def __reduce__(self) -> tuple[object, ...]:
         cls = type(self)
         return cls.__new__, (cls, *self.args), self.__dict__
 
@@ -141,7 +131,7 @@ def coerce_override(v: object) -> Override:
     return Override._make(v)
 
 
-OverrideT = Union[str, Tuple[str, bool]]
+OverrideT = Union[str, tuple[str, bool]]
 
 
 class Overrides(MutableSequence[OverrideT]):
@@ -163,7 +153,7 @@ class Overrides(MutableSequence[OverrideT]):
     """
 
     _path: str
-    _overrides: List[Override]
+    _overrides: list[Override]
 
     def __init__(
         self,

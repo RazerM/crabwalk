@@ -683,7 +683,7 @@ impl Walk {
             for override_ in overrides.iter()? {
                 let override_ = override_?;
                 let x = override_.get_item(0)?;
-                let glob = x.extract()?;
+                let glob = &*x.extract::<PyBackedStr>()?;
                 let case_insensitive = override_.get_item(1)?.extract()?;
                 overrides_builder
                     .case_insensitive(case_insensitive)
@@ -706,7 +706,7 @@ impl Walk {
                 let globs: Py<PyTuple> = types.__getitem__(py, &name)?.extract()?;
                 for glob in globs.extract::<Vec<PyBackedStr>>(py)? {
                     types_builder
-                        .add(name.extract()?, &glob)
+                        .add(&*name.extract::<PyBackedStr>()?, &glob)
                         .map_err(|err| err.into_py_err(py))?;
                 }
             }

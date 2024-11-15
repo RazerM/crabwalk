@@ -1,8 +1,7 @@
 import os
-import shutil
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator, List
 from unittest.mock import Mock
 
 import pytest
@@ -186,7 +185,7 @@ def test_types(tree_path: Path, walk_paths: WalkPaths) -> None:
     ],
 )
 def test_hidden(
-    tree_path: Path, walk_paths: WalkPaths, hidden: bool, paths: List[str]
+    tree_path: Path, walk_paths: WalkPaths, hidden: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", hidden=hidden, sort=True)
     assert list(walk_paths(walk)) == paths
@@ -209,7 +208,7 @@ def test_hidden(
     ],
 )
 def test_parents(
-    tree_path: Path, walk_paths: WalkPaths, parents: bool, paths: List[str]
+    tree_path: Path, walk_paths: WalkPaths, parents: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", parents=parents, sort=True)
     assert list(walk_paths(walk)) == paths
@@ -231,7 +230,7 @@ def test_parents(
     ],
 )
 def test_ignore(
-    tree_path: Path, walk_paths: WalkPaths, ignore: bool, paths: List[str]
+    tree_path: Path, walk_paths: WalkPaths, ignore: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", ignore=ignore, sort=True)
     assert list(walk_paths(walk)) == paths
@@ -253,7 +252,7 @@ def test_ignore(
     ],
 )
 def test_git_ignore(
-    tree_path: Path, walk_paths: WalkPaths, git_ignore: bool, paths: List[str]
+    tree_path: Path, walk_paths: WalkPaths, git_ignore: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", git_ignore=git_ignore, require_git=False, sort=True)
     assert list(walk_paths(walk)) == paths
@@ -281,7 +280,7 @@ def test_git_ignore(
     ],
 )
 def test_git_exclude(
-    tree_path: Path, walk_paths: WalkPaths, git_exclude: bool, paths: List[str]
+    tree_path: Path, walk_paths: WalkPaths, git_exclude: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", git_exclude=git_exclude, require_git=False, sort=True)
     assert list(walk_paths(walk)) == paths
@@ -303,7 +302,7 @@ def test_git_exclude(
     ],
 )
 def test_require_git(
-    tree_path: Path, walk_paths: WalkPaths, require_git: bool, paths: List[str]
+    tree_path: Path, walk_paths: WalkPaths, require_git: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", require_git=require_git, sort=True)
     assert list(walk_paths(walk)) == paths
@@ -328,7 +327,7 @@ def test_ignore_case_insensitive(
     tree_path: Path,
     walk_paths: WalkPaths,
     ignore_case_insensitive: bool,
-    paths: List[str],
+    paths: list[str],
 ) -> None:
     walk = Walk("root", ignore_case_insensitive=ignore_case_insensitive, sort=True)
     assert list(walk_paths(walk)) == paths

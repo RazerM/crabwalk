@@ -1,42 +1,50 @@
 [build-system]
-requires = ["setuptools", "setuptools-rust>=1.7.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1,<2"]
+build-backend = "maturin"
 
 [project]
 name = "crabwalk"
 version = "0.1"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = []
 authors = [
     { name = "Frazer McLean", email = "frazer@frazermclean.co.uk" }
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
+dev = [
+    { include-group = "coverage" },
+    "pytest>=8.3.3",
+    "typing-extensions>=4.12.2; python_version<'3.10'",
+]
 docs = [
-    "doc8",
-    "furo",
-    "myst-parser",
-    "sphinx",
+    "furo>=2024.8.6",
+    "myst-parser>=3.0.1",
+    "sphinx>=7.4.7",
 ]
-test = [
-    "pytest",
-    "typing_extensions; python_version<'3.10'",
+docstest = [
+    { include-group = "docs" },
+    "doc8>=1.1.2",
+]
+typing = [
+    "mypy>=1.13.0",
+]
+coverage = [
+    "coverage[toml]>=7.6.5",
+]
+nox = [
+    "nox>=2024.10.9",
 ]
 
-[tool.setuptools]
-zip-safe = false
-package-dir = { "" = "src" }
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["crabwalk"]
-
-[[tool.setuptools-rust.ext-modules]]
-target = "crabwalk._lib"
-path = "src/rust/Cargo.toml"
-py-limited-api = "auto"
-rust-version = ">=1.63.0"
+[tool.maturin]
+python-source = "src"
+python-packages = ["crabwalk"]
+manifest-path = "src/rust/Cargo.toml"
+module-name = "crabwalk._lib"
+locked = true
+sdist-generator = "git"
+features = ["pyo3/abi3-py39"]
 
 [tool.isort]
 profile = "black"
@@ -68,4 +76,31 @@ markers = [
     """tree(*children, chdir=False): Configure the tree_path fixture to create \
     this directory structure.\
     """,
+]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["crabwalk", "tests/"]
+parallel = true
+
+[tool.coverage.paths]
+crabwalk = [
+    "src/crabwalk",
+    "*.nox/*/lib*/python*/site-packages/crabwalk",
+    "*.nox\\*\\Lib\\site-packages\\crabwalk",
+]
+tests = [
+    "tests/",
+    "tests\\",
+]
+
+[tool.uv]
+# Lock latest versions for each Python version
+environments = [
+    "python_version>='3.13'",
+    "python_version=='3.12'",
+    "python_version=='3.11'",
+    "python_version=='3.10'",
+    "python_version=='3.9'",
 ]
