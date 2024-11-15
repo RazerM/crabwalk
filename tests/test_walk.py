@@ -78,6 +78,24 @@ def test_max_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
 @pytest.mark.tree(
     Directory(
         "root",
+        Directory(
+            "1",
+            Directory(
+                "2",
+                Directory("3"),
+            ),
+        ),
+    ),
+    chdir=True,
+)
+def test_depth(tree_path: Path, walk_entries: WalkEntries) -> None:
+    walk = Walk("root", max_depth=2, sort=True)
+    assert [entry.depth for entry in walk_entries(walk)] == [0, 1, 2]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
         Symlink("linked", "../sibling"),
     ),
     Directory(
