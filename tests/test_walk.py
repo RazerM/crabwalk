@@ -74,6 +74,11 @@ def test_max_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
     walk = Walk("root", max_depth=2, sort=True)
     assert list(walk_paths(walk)) == ["root", "root/1", "root/1/2"]
 
+    walk = Walk("root", sort=True)
+    assert walk.max_depth is None
+    walk.max_depth = 1
+    assert list(walk_paths(walk)) == ["root", "root/1"]
+
 
 @pytest.mark.tree(
     Directory(
@@ -108,6 +113,11 @@ def test_follow_symlinks(tree_path: Path, walk_paths: WalkPaths) -> None:
     walk = Walk("root", follow_symlinks=True, sort=True)
     assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
 
+    walk = Walk("root", sort=True)
+    assert walk.follow_symlinks == False
+    walk.follow_symlinks = True
+    assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
+
 
 @pytest.mark.tree(
     Directory(
@@ -120,6 +130,11 @@ def test_follow_symlinks(tree_path: Path, walk_paths: WalkPaths) -> None:
 )
 def test_max_filesize(tree_path: Path, walk_paths: WalkPaths) -> None:
     walk = Walk("root", max_filesize=2, sort=True)
+    assert list(walk_paths(walk)) == ["root", "root/one", "root/two"]
+
+    walk = Walk("root", sort=True)
+    assert walk.max_filesize is None
+    walk.max_filesize = 2
     assert list(walk_paths(walk)) == ["root", "root/one", "root/two"]
 
 
@@ -167,8 +182,18 @@ def test_custom_ignore_filenames(tree_path: Path, walk_paths: WalkPaths) -> None
     chdir=True,
 )
 def test_overrides(tree_path: Path, walk_paths: WalkPaths) -> None:
-    walk = Walk("root", overrides=Overrides(["!foo"], path="root"), sort=True)
+    overrides = Overrides(["!foo"], path="root")
+    walk = Walk("root", overrides=overrides, sort=True)
+    assert walk.overrides is overrides
     assert list(walk_paths(walk)) == ["root", "root/bar"]
+
+
+def test_overrides_setter_type() -> None:
+    with pytest.raises(TypeError, match="must be an Overrides instance"):
+        Walk("root", overrides=123)  # type: ignore[arg-type]
+    walk = Walk("root")
+    with pytest.raises(TypeError, match="must be an Overrides instance"):
+        walk.overrides = "foo"  # type: ignore[assignment]
 
 
 @pytest.mark.tree(
@@ -553,8 +578,11 @@ def test_standard_filters() -> None:
     assert walk.git_global
     assert walk.git_exclude
     walk.disable_standard_filters()
+    # mypy doesn't handle methods that mutate attributes and thinks some
+    # code below is unreachable.
+    # https://github.com/python/mypy/issues/17537
     assert not walk.hidden
-    assert not walk.parents
+    assert not walk.parents  # type: ignore[unreachable]
     assert not walk.ignore
     assert not walk.git_ignore
     assert not walk.git_global
@@ -566,3 +594,22 @@ def test_standard_filters() -> None:
     assert walk.git_ignore
     assert walk.git_global
     assert walk.git_exclude
+
+    walk.hidden = False
+    walk.parents = False
+    walk.ignore = False
+    walk.git_ignore = False
+    walk.git_global = False
+    walk.git_exclude = False
+    assert not walk.hidden
+    assert not walk.parents
+    assert not walk.ignore
+    assert not walk.git_ignore
+    assert not walk.git_global
+    assert not walk.git_exclude
+
+
+@pytest.mark.parametrize("paths", [["a"], ["a", "b"], ["./a"]])
+def test_paths(paths: list[str]) -> None:
+    walk = Walk(*paths)
+    assert walk.paths == paths
