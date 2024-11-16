@@ -542,3 +542,27 @@ def test_direntry_against_os_direntry(tree_path: Path, follow_symlinks: bool) ->
         assert os_entry.is_symlink() == cw_entry.is_symlink()
         assert os_entry.stat(follow_symlinks=follow_symlinks) == cw_entry.stat()
         assert cw_entry.follow_symlinks == follow_symlinks
+
+
+def test_standard_filters() -> None:
+    walk = Walk(".")
+    assert walk.hidden
+    assert walk.parents
+    assert walk.ignore
+    assert walk.git_ignore
+    assert walk.git_global
+    assert walk.git_exclude
+    walk.disable_standard_filters()
+    assert not walk.hidden
+    assert not walk.parents
+    assert not walk.ignore
+    assert not walk.git_ignore
+    assert not walk.git_global
+    assert not walk.git_exclude
+    walk.enable_standard_filters()
+    assert walk.hidden
+    assert walk.parents
+    assert walk.ignore
+    assert walk.git_ignore
+    assert walk.git_global
+    assert walk.git_exclude
