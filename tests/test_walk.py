@@ -475,6 +475,29 @@ def test_direntry_fspath_absolute(tree_path: Path, walk_entries: WalkEntries) ->
 @pytest.mark.tree(
     Directory(
         "root",
+        File("foo"),
+    ),
+)
+@pytest.mark.parametrize("stat_before_delete", [True, False])
+def test_stat_cached(
+    tree_path: Path, walk_entries: WalkEntries, stat_before_delete: bool
+) -> None:
+    root_path = tree_path / "root"
+    root, foo = walk_entries(Walk(root_path, sort=True))
+    if stat_before_delete:
+        foo.stat()
+    Path(foo).unlink()
+    if stat_before_delete:
+        # not only will this not raise but the same object must be returned
+        assert foo.stat() is foo.stat()
+    else:
+        with pytest.raises(FileNotFoundError):
+            foo.stat()
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
         File("file1"),
         Directory("dir1"),
         Symlink("link1", "file1"),
