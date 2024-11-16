@@ -20,9 +20,7 @@ def typing(session: nox.Session) -> None:
     session.run_install(
         "uv",
         "sync",
-        "--no-editable",
         "--group=typing",
-        "--reinstall-package=crabwalk",
         env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
     )
     session.run("mypy", "src/crabwalk", "tests")
