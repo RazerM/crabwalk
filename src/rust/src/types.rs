@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -25,7 +26,7 @@ pub enum Selection {
 #[pyclass(module = "crabwalk", mapping)]
 #[derive(Clone)]
 pub struct Types {
-    types: Option<Py<PyDict>>,
+    types: Arc<Option<Py<PyDict>>>,
     pub selections: Vec<Selection>,
 }
 
@@ -39,7 +40,7 @@ impl Types {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
         let instance = Self {
-            types: Some(PyDict::new_bound(py).unbind()),
+            types: Arc::new(Some(PyDict::new_bound(py).unbind())),
             selections: Vec::new(),
         };
         instance.update(py, initial, kwargs)?;
@@ -51,7 +52,7 @@ impl Types {
         py: Python<'py>,
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let types: &Bound<'py, PyAny> = self.types.as_ref().unwrap().bind(py);
+        let types: &Bound<'py, PyAny> = self.types.as_ref().as_ref().unwrap().bind(py);
         types
             .get_item(name)?
             .downcast::<PyList>()?
@@ -154,15 +155,15 @@ impl Types {
     }
 
     pub fn __len__(&self, py: Python<'_>) -> usize {
-        self.types.as_ref().unwrap().bind(py).len()
+        self.types.as_ref().as_ref().unwrap().bind(py).len()
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        PyIterator::from_bound_object(self.types.as_ref().unwrap().bind(py)).map(Into::into)
+        PyIterator::from_bound_object(self.types.as_ref().as_ref().unwrap().bind(py)).map(Into::into)
     }
 
     pub fn __delitem__(&self, py: Python<'_>, name: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.types.as_ref().unwrap().bind(py).del_item(name)
+        self.types.as_ref().as_ref().unwrap().bind(py).del_item(name)
     }
 
     pub fn __setitem__(
@@ -206,6 +207,7 @@ impl Types {
         let (name, globs): (Bound<'_, _>, Bound<'_, PyList>) = self
             .types
             .as_ref()
+            .as_ref()
             .unwrap()
             .bind(py)
             .call_method0("popitem")?
@@ -214,7 +216,7 @@ impl Types {
     }
 
     pub fn clear(&self, py: Python<'_>) {
-        self.types.as_ref().unwrap().bind(py).clear()
+        self.types.as_ref().as_ref().unwrap().bind(py).clear()
     }
 
     #[pyo3(
@@ -231,12 +233,12 @@ impl Types {
         if let Ok(other) = other.downcast::<PyMapping>() {
             for name in other.iter()? {
                 let name = &name?;
-                self.__setitem__(py, &*name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
+                self.__setitem__(py, &name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
             }
         } else if other.hasattr("keys")? {
             for name in other.call_method0("keys")?.iter()? {
                 let name = &name?;
-                self.__setitem__(py, &*name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
+                self.__setitem__(py, &name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
             }
         } else {
             for item in other.iter()? {
@@ -246,7 +248,7 @@ impl Types {
         }
         if let Some(kwargs) = kwargs {
             for (name, globs) in kwargs.iter() {
-                self.__setitem__(py, &*name.extract::<PyBackedStr>()?, &globs.extract()?)?;
+                self.__setitem__(py, &name.extract::<PyBackedStr>()?, &globs.extract()?)?;
             }
         }
         Ok(())
@@ -266,7 +268,7 @@ impl Types {
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs),
             Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => {
-                self.__setitem__(py, &*key.extract::<PyBackedStr>()?, &default)?;
+                self.__setitem__(py, &key.extract::<PyBackedStr>()?, &default)?;
                 Ok(default.to_tuple()?)
             }
             Err(err) => Err(err),
@@ -280,7 +282,7 @@ impl Types {
         if name == "all" || !RE.is_match(name) {
             return Err(ignore::Error::InvalidDefinition.into_py_err(py));
         }
-        let types = self.types.as_ref().unwrap().bind(py);
+        let types = self.types.as_ref().as_ref().unwrap().bind(py);
         let globs: Bound<'_, PyList> = match types.get_item(name)? {
             Some(globs) => globs.downcast_into()?,
             None => {
@@ -315,7 +317,7 @@ impl Types {
     /// If `name` is `all`, then all file types currently defined are selected.
     pub fn select(&mut self, py: Python<'_>, name: &str) {
         if name == "all" {
-            for name in self.types.as_ref().unwrap().bind(py).keys() {
+            for name in self.types.as_ref().as_ref().unwrap().bind(py).keys() {
                 self.selections.push(Selection::Select(name.to_string()));
             }
         } else {
@@ -328,7 +330,7 @@ impl Types {
     /// If `name` is `all`, then all file types currently defined are negated.
     pub fn negate(&mut self, py: Python<'_>, name: &str) {
         if name == "all" {
-            for name in self.types.as_ref().unwrap().bind(py).keys() {
+            for name in self.types.as_ref().as_ref().unwrap().bind(py).keys() {
                 self.selections.push(Selection::Negate(name.to_string()));
             }
         } else {
@@ -336,8 +338,8 @@ impl Types {
         }
     }
 
-    fn __getnewargs__(&self) -> (Py<PyDict>,) {
-        (self.types.clone().unwrap(),)
+    fn __getnewargs__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyDict>,) {
+        (self.types.as_ref().as_ref().unwrap().bind(py).clone(),)
     }
 
     fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
@@ -370,13 +372,13 @@ impl Types {
     }
 
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        if let Some(types) = &self.types {
+        if let Some(types) = self.types.as_ref() {
             visit.call(types)?;
         }
         Ok(())
     }
 
     fn __clear__(&mut self) {
-        self.types = None;
+        self.types = Arc::new(None);
     }
 }

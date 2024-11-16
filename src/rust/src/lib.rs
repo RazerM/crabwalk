@@ -383,8 +383,11 @@ impl Walk {
     }
 
     #[getter]
-    fn sort(&self, py: Python<'_>) -> PyObject {
-        self.sort.clone().unwrap_or_else(|| false.into_py(py))
+    fn sort<'py>(&self, py: Python<'py>) -> Bound<'py, PyAny> {
+        self.sort
+            .as_ref()
+            .map(|sort| sort.bind(py).clone())
+            .unwrap_or_else(|| false.into_py(py).into_bound(py))
     }
 
     #[setter]
@@ -423,8 +426,8 @@ impl Walk {
     }
 
     #[getter]
-    fn filter_entry(&self) -> Option<PyObject> {
-        self.filter_entry.clone()
+    fn filter_entry<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        self.filter_entry.as_ref().map(|f| f.bind(py).clone())
     }
 
     #[setter]
@@ -435,8 +438,10 @@ impl Walk {
     }
 
     #[getter]
-    fn onerror(&self) -> Option<PyObject> {
-        self.onerror.clone()
+    fn onerror<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        self.onerror
+            .as_ref()
+            .map(|onerror| onerror.bind(py).clone())
     }
 
     #[setter]
@@ -466,6 +471,7 @@ impl Walk {
         self.state = State::Closed;
     }
 
+    #[pyo3(signature = (_exc_type, _exc_val, _exc_tb))]
     fn __exit__(
         &mut self,
         _exc_type: Option<&Bound<'_, PyType>>,
@@ -500,7 +506,7 @@ impl Walk {
                     return Ok(Some(DirEntry::new(dent, self.follow_symlinks)));
                 }
                 Err(err) => {
-                    if let Some(onerror) = self.onerror.clone() {
+                    if let Some(onerror) = self.onerror.as_ref() {
                         convert_and_call_onerror(py, onerror.bind(py), err)?;
                     }
                 }
@@ -621,7 +627,11 @@ impl Walk {
             builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
-        if let Some(filter_entry) = self.filter_entry.clone() {
+        if let Some(filter_entry) = self
+            .filter_entry
+            .as_ref()
+            .map(|f| f.bind(py).clone().unbind())
+        {
             let follow_symlinks = self.follow_symlinks;
             builder.filter_entry(move |dent| {
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
@@ -642,7 +652,11 @@ impl Walk {
             });
         }
 
-        if let Some(sort) = self.sort.clone() {
+        if let Some(sort) = self
+            .sort
+            .as_ref()
+            .map(|sort| sort.bind(py).clone().unbind())
+        {
             if sort.bind(py).is_callable() {
                 builder.sort_by_file_path(move |a, b| {
                     fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
@@ -706,7 +720,7 @@ impl Walk {
                 let globs: Py<PyTuple> = types.__getitem__(py, &name)?.extract()?;
                 for glob in globs.extract::<Vec<PyBackedStr>>(py)? {
                     types_builder
-                        .add(&*name.extract::<PyBackedStr>()?, &glob)
+                        .add(&name.extract::<PyBackedStr>()?, &glob)
                         .map_err(|err| err.into_py_err(py))?;
                 }
             }
@@ -740,7 +754,11 @@ impl Walk {
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {
-        if let Some(onerror) = self.onerror.clone() {
+        if let Some(onerror) = self
+            .onerror
+            .as_ref()
+            .map(|onerror| onerror.bind(py).clone().unbind())
+        {
             convert_and_call_onerror(py, onerror.bind(py), err)?;
         }
         Ok(())
