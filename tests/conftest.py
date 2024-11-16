@@ -35,6 +35,8 @@ def tree_path_fixture(
     tree_path = tmp_path_factory.mktemp("tree")
 
     marker = request.node.get_closest_marker("tree")
+    if marker is None:
+        raise TypeError("tree_path fixture requires pytest.mark.tree(...)")
     tree = Tree.from_marker(marker)
     tree.setup(tree_path, monkeypatch)
 
