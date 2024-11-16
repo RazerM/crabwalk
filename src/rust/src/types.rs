@@ -40,7 +40,7 @@ impl Types {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
         let instance = Self {
-            types: Arc::new(Some(PyDict::new_bound(py).unbind())),
+            types: Arc::new(Some(PyDict::new(py).unbind())),
             selections: Vec::new(),
         };
         instance.update(py, initial, kwargs)?;
@@ -69,8 +69,8 @@ impl Types {
     ) -> PyResult<Bound<'py, PyAny>> {
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs.into_any()),
-            Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => {
-                Ok(default.to_object(py).into_bound(py))
+            Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => {
+                Ok(default.into_pyobject(py)?)
             }
             Err(err) => Err(err),
         }
@@ -79,7 +79,7 @@ impl Types {
     pub fn __contains__(&self, py: Python<'_>, name: &Bound<'_, PyAny>) -> PyResult<bool> {
         match self.__getitem__(py, name) {
             Ok(_) => Ok(true),
-            Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => Ok(false),
+            Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => Ok(false),
             Err(err) => Err(err),
         }
     }
@@ -113,45 +113,45 @@ impl Types {
         py: Python<'py>,
         other: &Bound<'py, PyMapping>,
         op: CompareOp,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let equal = match op {
             CompareOp::Eq => true,
             CompareOp::Ne => false,
-            _ => return Ok(py.NotImplemented()),
+            _ => return Ok(py.NotImplemented().into_bound(py)),
         };
         let notequal = !equal;
 
-        let self_obj = self_.into_py(py);
-        let self_mapping = self_obj.bind(py).downcast::<PyMapping>()?;
+        let self_obj = self_.into_pyobject(py)?;
+        let self_mapping = self_obj.downcast::<PyMapping>()?;
 
         if self_mapping.len()? != other.len()? {
-            return Ok(notequal.to_object(py));
+            return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
         }
 
         let items: PyResult<Vec<(Bound<'_, PyString>, Bound<'_, PySequence>)>> = self_mapping
             .items()?
-            .iter()?
-            .map(|i| i.and_then(|t| t.extract()))
+            .iter()
+            .map(|t| t.extract())
             .collect();
 
         for (name, globs) in items? {
             let other_globs = match other.get_item(name) {
                 Ok(globs) => globs,
-                Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => {
-                    return Ok(notequal.to_object(py))
+                Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => {
+                    return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
                 }
                 Err(err) => return Err(err),
             };
             let other_globs: Bound<'_, PySequence> = match other_globs.extract() {
                 Ok(globs) => globs,
-                Err(_) => return Ok(notequal.to_object(py)),
+                Err(_) => return Ok(notequal.into_pyobject(py)?.to_owned().into_any()),
             };
             println!("{} != {}", globs, other_globs);
             if globs.ne(other_globs)? {
-                return Ok(notequal.to_object(py));
+                return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
             }
         }
-        Ok(equal.to_object(py))
+        Ok(equal.into_pyobject(py)?.to_owned().into_any())
     }
 
     pub fn __len__(&self, py: Python<'_>) -> usize {
@@ -159,7 +159,7 @@ impl Types {
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        PyIterator::from_bound_object(self.types.as_ref().as_ref().unwrap().bind(py)).map(Into::into)
+        PyIterator::from_object(self.types.as_ref().as_ref().unwrap().bind(py)).map(Into::into)
     }
 
     pub fn __delitem__(&self, py: Python<'_>, name: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -172,27 +172,27 @@ impl Types {
         name: &str,
         globs: &Bound<'_, PySequence>,
     ) -> PyResult<()> {
-        for glob in globs.iter()? {
+        for glob in globs.try_iter()? {
             self.add(py, name, glob?.downcast()?)?;
         }
         Ok(())
     }
 
     #[pyo3(signature = (key, default=Maybe::Missing, /))]
-    pub fn pop(
+    pub fn pop<'py>(
         &self,
-        py: Python<'_>,
-        key: &Bound<'_, PyAny>,
-        default: Maybe<Bound<'_, PyAny>>,
-    ) -> PyResult<PyObject> {
+        py: Python<'py>,
+        key: &Bound<'py, PyAny>,
+        default: Maybe<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         match self.__getitem__(py, key) {
             Ok(globs) => {
                 self.__delitem__(py, key)?;
-                Ok(globs.to_object(py))
+                Ok(globs.into_pyobject(py)?.into_any())
             }
-            Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => {
+            Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => {
                 match default {
-                    Maybe::Some(default) => Ok(default.to_object(py)),
+                    Maybe::Some(default) => Ok(default.into_pyobject(py)?),
                     Maybe::Missing => Err(err),
                 }
             }
@@ -229,19 +229,19 @@ impl Types {
         other: Option<Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let other = other.unwrap_or_else(|| PyTuple::empty_bound(py).into_any());
+        let other = other.unwrap_or_else(|| PyTuple::empty(py).into_any());
         if let Ok(other) = other.downcast::<PyMapping>() {
-            for name in other.iter()? {
+            for name in other.try_iter()? {
                 let name = &name?;
                 self.__setitem__(py, &name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
             }
         } else if other.hasattr("keys")? {
-            for name in other.call_method0("keys")?.iter()? {
+            for name in other.call_method0("keys")?.try_iter()? {
                 let name = &name?;
                 self.__setitem__(py, &name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
             }
         } else {
-            for item in other.iter()? {
+            for item in other.try_iter()? {
                 let (name, globs): (PyBackedStr, _) = item?.extract()?;
                 self.__setitem__(py, &name, &globs)?;
             }
@@ -264,10 +264,10 @@ impl Types {
         key: &Bound<'py, PyAny>,
         default: Option<Bound<'py, PySequence>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let default = default.unwrap_or_else(|| PyTuple::empty_bound(py).extract().unwrap());
+        let default = default.unwrap_or_else(|| PyTuple::empty(py).extract().unwrap());
         match self.__getitem__(py, key) {
             Ok(globs) => Ok(globs),
-            Err(err) if err.is_instance_bound(py, &py.get_type_bound::<PyKeyError>()) => {
+            Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => {
                 self.__setitem__(py, &key.extract::<PyBackedStr>()?, &default)?;
                 Ok(default.to_tuple()?)
             }
@@ -286,7 +286,7 @@ impl Types {
         let globs: Bound<'_, PyList> = match types.get_item(name)? {
             Some(globs) => globs.downcast_into()?,
             None => {
-                let globs = PyList::empty_bound(py);
+                let globs = PyList::empty(py);
                 types.set_item(name, &globs)?;
                 globs
             }
@@ -305,7 +305,7 @@ impl Types {
                 self.add(
                     py,
                     definition.name(),
-                    glob.to_object(py).bind(py).downcast()?,
+                    glob.into_pyobject(py)?.downcast()?,
                 )?
             }
         }
@@ -351,8 +351,8 @@ impl Types {
                 Selection::Negate(name) => ("negate", name),
             })
             .collect();
-        let state = PyDict::new_bound(py);
-        state.set_item("selections", selections.to_object(py))?;
+        let state = PyDict::new(py);
+        state.set_item("selections", selections.into_pyobject(py)?)?;
         Ok(state.into())
     }
 

@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::ffi::OsString;
 
 use pyo3::ffi;
@@ -26,4 +27,15 @@ pub fn fspath_list(paths: &Bound<'_, PyList>) -> PyResult<Vec<OsString>> {
 pub enum Maybe<T> {
     Some(T),
     Missing,
+}
+
+pub(crate) trait InfallibleResult<T> {
+    fn into_ok(self) -> T;
+}
+
+impl<T> InfallibleResult<T> for Result<T, Infallible> {
+    fn into_ok(self) -> T {
+        // Safety: this result is infallible
+        unsafe { self.unwrap_unchecked() }
+    }
 }
