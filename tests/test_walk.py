@@ -414,10 +414,16 @@ def test_sort_function(
     assert {args[0] for _, args, _ in mock_sort.mock_calls} == {"root/a", "root/b"}
 
 
-def test_sort_truthy() -> None:
+@pytest.mark.parametrize("value", [0, 1, "", None, 42])
+def test_sort_type_error(value: object) -> None:
+    if value is not None:
+        with pytest.raises(TypeError):
+            walk = Walk(".", sort=value)  # type: ignore[arg-type]
+
     walk = Walk(".")
-    walk.sort = 1
-    assert walk.sort is True
+    with pytest.raises(TypeError):
+        walk.sort = value  # type: ignore[assignment]
+    assert walk.sort is False
 
 
 @pytest.mark.tree(

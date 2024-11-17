@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::GILOnceCell;
 use pyo3::types::{PyBool, PyList, PySequence, PyTraceback, PyTuple, PyType};
-use pyo3::{ffi, PyTraverseError, PyTypeInfo, PyVisit};
+use pyo3::{ffi, BoundObject, PyTraverseError, PyTypeInfo, PyVisit};
 
 use crate::direntry::DirEntry;
 use crate::error::IntoPyErr;
@@ -56,7 +56,7 @@ pub struct Walk {
     git_exclude: bool,
     require_git: bool,
     ignore_case_insensitive: bool,
-    sort: Option<PyObject>,
+    sort: SortValue,
     same_file_system: bool,
     skip_stdout: bool,
     filter_entry: Option<PyObject>,
@@ -126,14 +126,8 @@ impl Walk {
             None => Some(PyList::empty(py).unbind()),
         };
         let sort = match sort {
-            Some(sort) => {
-                if sort.is_truthy()? {
-                    Some(sort)
-                } else {
-                    None
-                }
-            }
-            None => None,
+            Some(sort) => SortValue::new(sort)?,
+            None => SortValue::Bool(false),
         };
         let mut instance = Self {
             state: State::Unopened,
@@ -153,7 +147,7 @@ impl Walk {
             git_exclude,
             require_git,
             ignore_case_insensitive,
-            sort: sort.map(Bound::unbind),
+            sort,
             same_file_system,
             skip_stdout,
             filter_entry,
@@ -383,21 +377,14 @@ impl Walk {
     }
 
     #[getter]
-    fn sort<'py>(&self, py: Python<'py>) -> Bound<'py, PyAny> {
-        self.sort
-            .as_ref()
-            .map(|sort| sort.bind(py).clone())
-            .unwrap_or_else(|| PyBool::new(py, false).to_owned().into_any())
+    fn sort(&self) -> &SortValue {
+        &self.sort
     }
 
     #[setter]
-    fn set_sort(&mut self, py: Python<'_>, value: PyObject) -> PyResult<()> {
+    fn set_sort(&mut self, value: Bound<'_, PyAny>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.sort = if value.is_truthy(py)? {
-            Some(value)
-        } else {
-            None
-        };
+        self.sort = SortValue::new(value)?;
         Ok(())
     }
 
@@ -537,7 +524,7 @@ impl Walk {
         if let Some(types) = &self.types {
             visit.call(types)?;
         }
-        if let Some(sort) = &self.sort {
+        if let SortValue::Callable(sort) = &self.sort {
             visit.call(sort)?;
         }
         if let Some(filter_entry) = &self.filter_entry {
@@ -555,7 +542,7 @@ impl Walk {
         self.custom_ignore_filenames = None;
         self.overrides = None;
         self.types = None;
-        self.sort = None;
+        self.sort = SortValue::Bool(false);
         self.filter_entry = None;
         self.onerror = None;
     }
@@ -652,12 +639,9 @@ impl Walk {
             });
         }
 
-        if let Some(sort) = self
-            .sort
-            .as_ref()
-            .map(|sort| sort.bind(py).clone().unbind())
-        {
-            if sort.bind(py).is_callable() {
+        match &self.sort {
+            SortValue::Callable(sort) => {
+                let sort = sort.bind(py).clone().unbind();
                 builder.sort_by_file_path(move |a, b| {
                     fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
                         Python::with_gil(|py| {
@@ -685,9 +669,11 @@ impl Walk {
                         a.cmp(b)
                     })
                 });
-            } else {
+            },
+            SortValue::Bool(true) => {
                 builder.sort_by_file_path(|a, b| a.cmp(b));
-            }
+            },
+            SortValue::Bool(false) => {},
         }
 
         if let Some(overrides) = &self.overrides {
@@ -789,6 +775,48 @@ impl Drop for Walk {
                     }
                 }
             });
+        }
+    }
+}
+
+enum SortValue {
+    Callable(PyObject),
+    Bool(bool),
+}
+
+impl SortValue {
+    fn new(value: Bound<'_, PyAny>) -> PyResult<Self> {
+        if value.is_instance_of::<PyBool>() {
+            Ok(Self::Bool(value.extract()?))
+        } else if value.is_callable() {
+            Ok(Self::Callable(value.unbind()))
+        } else {
+            Err(PyTypeError::new_err("sort must be bool or Callable"))
+        }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for SortValue {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        match self {
+            Self::Callable(sort) => Ok(sort.into_bound(py)),
+            Self::Bool(sort) => Ok(PyBool::new(py, sort).to_owned().into_any()),
+        }
+    }
+}
+
+impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
+    type Target = PyAny;
+    type Output = Borrowed<'a, 'py, Self::Target>;
+    type Error = std::convert::Infallible;
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        match self {
+            SortValue::Callable(sort) => Ok(sort.bind_borrowed(py)),
+            SortValue::Bool(sort) => Ok(PyBool::new(py, *sort).into_any()),
         }
     }
 }
