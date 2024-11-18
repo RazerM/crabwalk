@@ -7,8 +7,8 @@ use pyo3::types::{PyDict, PyIterator, PyList, PyMapping, PySequence, PyString, P
 use pyo3::{PyTraverseError, PyVisit};
 use regex::Regex;
 
-use crate::error::IntoPyErr;
 use crate::util::Maybe;
+use crate::error::IgnoreError;
 use crate::{ITEMS_VIEW_TYPE, KEYS_VIEW_TYPE, VALUES_VIEW_TYPE};
 
 impl<'py> FromPyObject<'py> for Maybe<Bound<'py, PyAny>> {
@@ -280,7 +280,7 @@ impl Types {
             static ref RE: Regex = Regex::new(r"^[\pL\pN]+$").unwrap();
         }
         if name == "all" || !RE.is_match(name) {
-            return Err(ignore::Error::InvalidDefinition.into_py_err(py));
+            return Err(IgnoreError::from(ignore::Error::InvalidDefinition).into());
         }
         let types = self.types.as_ref().as_ref().unwrap().bind(py);
         let globs: Bound<'_, PyList> = match types.get_item(name)? {

@@ -15,7 +15,7 @@ use pyo3::types::{PyBool, PyList, PySequence, PyTraceback, PyTuple, PyType};
 use pyo3::{ffi, BoundObject, PyTraverseError, PyTypeInfo, PyVisit};
 
 use crate::direntry::DirEntry;
-use crate::error::IntoPyErr;
+use crate::error::IgnoreError;
 use crate::types::{Selection, Types};
 use crate::util::{fspath, fspath_list};
 
@@ -494,7 +494,7 @@ impl Walk {
                 }
                 Err(err) => {
                     if let Some(onerror) = self.onerror.as_ref() {
-                        convert_and_call_onerror(py, onerror.bind(py), err)?;
+                        convert_and_call_onerror(onerror.bind(py), err)?;
                     }
                 }
             }
@@ -687,14 +687,14 @@ impl Walk {
                 let case_insensitive = override_.get_item(1)?.extract()?;
                 overrides_builder
                     .case_insensitive(case_insensitive)
-                    .map_err(|err| err.into_py_err(py))?;
+                    .map_err(IgnoreError::from)?;
                 overrides_builder
                     .add(glob)
-                    .map_err(|err| err.into_py_err(py))?;
+                    .map_err(IgnoreError::from)?;
             }
             let overrides = overrides_builder
                 .build()
-                .map_err(|err| err.into_py_err(py))?;
+                .map_err(IgnoreError::from)?;
             builder.overrides(overrides);
         }
 
@@ -707,7 +707,7 @@ impl Walk {
                 for glob in globs.extract::<Vec<PyBackedStr>>(py)? {
                     types_builder
                         .add(&name.extract::<PyBackedStr>()?, &glob)
-                        .map_err(|err| err.into_py_err(py))?;
+                        .map_err(IgnoreError::from)?;
                 }
             }
             for selection in &types.selections {
@@ -720,7 +720,7 @@ impl Walk {
                     }
                 }
             }
-            let types = types_builder.build().map_err(|err| err.into_py_err(py))?;
+            let types = types_builder.build().map_err(IgnoreError::from)?;
             builder.types(types);
         }
 
@@ -745,7 +745,7 @@ impl Walk {
             .as_ref()
             .map(|onerror| onerror.bind(py).clone().unbind())
         {
-            convert_and_call_onerror(py, onerror.bind(py), err)?;
+            convert_and_call_onerror(onerror.bind(py), err)?;
         }
         Ok(())
     }
@@ -822,11 +822,10 @@ impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
 }
 
 fn convert_and_call_onerror(
-    py: Python<'_>,
     onerror: &Bound<'_, PyAny>,
     err: ignore::Error,
 ) -> PyResult<()> {
-    onerror.call1((err.into_py_err(py),)).map(|_| ())
+    onerror.call1((PyErr::from(IgnoreError::from(err)),)).map(|_| ())
 }
 
 #[pymodule]
