@@ -146,7 +146,6 @@ impl Types {
                 Ok(globs) => globs,
                 Err(_) => return Ok(notequal.into_pyobject(py)?.to_owned().into_any()),
             };
-            println!("{} != {}", globs, other_globs);
             if globs.ne(other_globs)? {
                 return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
             }
@@ -172,8 +171,14 @@ impl Types {
         name: &str,
         globs: &Bound<'_, PySequence>,
     ) -> PyResult<()> {
-        for glob in globs.try_iter()? {
-            self.add(py, name, glob?.downcast()?)?;
+        if globs.len()? == 0 {
+            let types = self.types.as_ref().as_ref().unwrap().bind(py);
+            let globs = PyList::empty(py);
+            types.set_item(name, &globs)?;
+        } else {
+            for glob in globs.try_iter()? {
+                self.add(py, name, glob?.downcast()?)?;
+            }
         }
         Ok(())
     }
