@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms)]
 
 use std::cmp::Ordering;
-use std::ffi::{OsString};
+use std::ffi::OsString;
 use std::path::Path;
 use std::ptr;
 
@@ -16,7 +16,7 @@ use pyo3::{ffi, BoundObject, PyTraverseError, PyTypeInfo, PyVisit};
 
 use crate::direntry::DirEntry;
 use crate::error::IgnoreError;
-use crate::types::{Selection, Types};
+use crate::types::{Negate, Select, Selection, Types};
 use crate::util::{fspath, fspath_list};
 
 mod direntry;
@@ -413,8 +413,8 @@ impl Walk {
     }
 
     #[getter]
-    fn filter_entry<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
-        self.filter_entry.as_ref().map(|f| f.bind(py).clone())
+    fn filter_entry(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.filter_entry.as_ref().map(|f| f.clone_ref(py))
     }
 
     #[setter]
@@ -425,10 +425,8 @@ impl Walk {
     }
 
     #[getter]
-    fn onerror<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
-        self.onerror
-            .as_ref()
-            .map(|onerror| onerror.bind(py).clone())
+    fn onerror(&self, py: Python<'_>) -> Option<PyObject> {
+        self.onerror.as_ref().map(|onerror| onerror.clone_ref(py))
     }
 
     #[setter]
@@ -614,11 +612,7 @@ impl Walk {
             builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
-        if let Some(filter_entry) = self
-            .filter_entry
-            .as_ref()
-            .map(|f| f.bind(py).clone().unbind())
-        {
+        if let Some(filter_entry) = self.filter_entry.as_ref().map(|f| f.clone_ref(py)) {
             let follow_symlinks = self.follow_symlinks;
             builder.filter_entry(move |dent| {
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
@@ -641,7 +635,7 @@ impl Walk {
 
         match &self.sort {
             SortValue::Callable(sort) => {
-                let sort = sort.bind(py).clone().unbind();
+                let sort = sort.clone_ref(py);
                 builder.sort_by_file_path(move |a, b| {
                     fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
                         Python::with_gil(|py| {
@@ -669,11 +663,11 @@ impl Walk {
                         a.cmp(b)
                     })
                 });
-            },
+            }
             SortValue::Bool(true) => {
                 builder.sort_by_file_path(|a, b| a.cmp(b));
-            },
-            SortValue::Bool(false) => {},
+            }
+            SortValue::Bool(false) => {}
         }
 
         if let Some(overrides) = &self.overrides {
@@ -688,13 +682,9 @@ impl Walk {
                 overrides_builder
                     .case_insensitive(case_insensitive)
                     .map_err(IgnoreError::from)?;
-                overrides_builder
-                    .add(glob)
-                    .map_err(IgnoreError::from)?;
+                overrides_builder.add(glob).map_err(IgnoreError::from)?;
             }
-            let overrides = overrides_builder
-                .build()
-                .map_err(IgnoreError::from)?;
+            let overrides = overrides_builder.build().map_err(IgnoreError::from)?;
             builder.overrides(overrides);
         }
 
@@ -712,11 +702,11 @@ impl Walk {
             }
             for selection in &types.selections {
                 match selection {
-                    Selection::Select(name) => {
-                        types_builder.select(name);
+                    Selection::Select(select) => {
+                        types_builder.select(&select.borrow(py).name(py)?);
                     }
-                    Selection::Negate(name) => {
-                        types_builder.negate(name);
+                    Selection::Negate(negate) => {
+                        types_builder.negate(&negate.borrow(py).name(py)?);
                     }
                 }
             }
@@ -740,11 +730,7 @@ impl Walk {
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {
-        if let Some(onerror) = self
-            .onerror
-            .as_ref()
-            .map(|onerror| onerror.bind(py).clone().unbind())
-        {
+        if let Some(onerror) = self.onerror.as_ref().map(|onerror| onerror.clone_ref(py)) {
             convert_and_call_onerror(onerror.bind(py), err)?;
         }
         Ok(())
@@ -765,9 +751,12 @@ impl Drop for Walk {
                 // Note: Until pyo3 lets us implement tp_finalize, we can't use
                 // PyErr_ResourceWarning, include the repr in the message, or pass the instance to
                 // PyErr_WriteUnraisable for additional context.
-                if let Err(err) =
-                    PyErr::warn(py, &resource_warning_type, ffi::c_str!("Unclosed Walk iterator"), 1)
-                {
+                if let Err(err) = PyErr::warn(
+                    py,
+                    &resource_warning_type,
+                    ffi::c_str!("Unclosed Walk iterator"),
+                    1,
+                ) {
                     if err.matches(py, warning_type).unwrap_or(false) {
                         err.restore(py);
                         // SAFETY: NULL is an acceptable pointer when there is no available context.
@@ -821,11 +810,9 @@ impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
     }
 }
 
-fn convert_and_call_onerror(
-    onerror: &Bound<'_, PyAny>,
-    err: ignore::Error,
-) -> PyResult<()> {
-    onerror.call1((PyErr::from(IgnoreError::from(err)),)).map(|_| ())
+fn convert_and_call_onerror(onerror: &Bound<'_, PyAny>, err: ignore::Error) -> PyResult<()> {
+    let _ = onerror.call1((PyErr::from(IgnoreError::from(err)),))?;
+    Ok(())
 }
 
 #[pymodule]
@@ -838,6 +825,8 @@ fn _lib(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Walk>()?;
     mutable_mapping_type.call_method1("register", (Types::type_object(py),))?;
     m.add_class::<Types>()?;
+    m.add_class::<Select>()?;
+    m.add_class::<Negate>()?;
     m.add_class::<DirEntry>()?;
 
     let name = "_types".into_pyobject(py)?;

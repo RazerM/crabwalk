@@ -43,6 +43,20 @@ VIn: TypeAlias = Sequence[str]
 VOut: TypeAlias = tuple[str, ...]
 
 @final
+class Select:
+    __match_args__ = ("name",)
+    name: str
+
+    def __init__(self, name: str) -> None: ...
+
+@final
+class Negate:
+    __match_args__ = ("name",)
+    name: str
+
+    def __init__(self, name: str) -> None: ...
+
+@final
 class Types(MutableMapping[str, VOut]):
     @overload
     def __init__(
@@ -68,6 +82,7 @@ class Types(MutableMapping[str, VOut]):
     def add_defaults(self) -> None: ...
     def select(self, name: str) -> None: ...
     def negate(self, name: str) -> None: ...
+    def selections(self) -> Iterator[Select | Negate]: ...
 
 @final
 class Walk:

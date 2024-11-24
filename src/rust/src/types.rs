@@ -1,14 +1,14 @@
-use std::sync::Arc;
-use pyo3::basic::CompareOp;
-use pyo3::exceptions::{PyKeyError, PyValueError};
+use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::types::{PyDict, PyIterator, PyList, PyMapping, PySequence, PyString, PyTuple};
-use pyo3::{PyTraverseError, PyVisit};
+use pyo3::{intern, DowncastError, PyTraverseError, PyTypeInfo, PyVisit};
 use regex::Regex;
+use std::iter::zip;
+use std::sync::Arc;
 
-use crate::util::Maybe;
 use crate::error::IgnoreError;
+use crate::util::Maybe;
 use crate::{ITEMS_VIEW_TYPE, KEYS_VIEW_TYPE, VALUES_VIEW_TYPE};
 
 impl<'py> FromPyObject<'py> for Maybe<Bound<'py, PyAny>> {
@@ -17,14 +17,196 @@ impl<'py> FromPyObject<'py> for Maybe<Bound<'py, PyAny>> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[pyclass(module = "crabwalk", frozen)]
+pub struct Select {
+    name: Py<PyString>,
+}
+
+#[pymethods]
+impl Select {
+    #[classattr]
+    fn __match_args__() -> (String,) {
+        ("name".to_string(),)
+    }
+
+    #[new]
+    #[pyo3(signature = (name, /))]
+    fn py_new(name: Py<PyString>) -> Self {
+        Self { name }
+    }
+
+    #[getter]
+    fn get_name(&self, py: Python<'_>) -> Py<PyString> {
+        self.name.clone_ref(py)
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let name = self.name.bind_borrowed(py);
+        Ok(format!("<Select {}>", name.repr()?))
+    }
+
+    fn __getnewargs__(&self, py: Python<'_>) -> (Py<PyString>,) {
+        (self.name.clone_ref(py),)
+    }
+
+    fn __eq__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
+        self.name.bind(py).as_any().eq(other.name.bind(py))
+    }
+
+    fn __ne__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
+        self.name.bind(py).as_any().ne(other.name.bind(py))
+    }
+
+    fn __hash__(&self, py: Python<'_>) -> PyResult<isize> {
+        let elements = [
+            &Self::type_object(py).into_any(),
+            self.name.bind(py).as_any(),
+        ];
+        PyTuple::new(py, elements)?.hash()
+    }
+}
+
+impl Select {
+    pub fn new(name: Py<PyString>) -> Self {
+        Self { name }
+    }
+
+    pub fn name(&self, py: Python<'_>) -> PyResult<PyBackedStr> {
+        self.name.bind_borrowed(py).extract::<PyBackedStr>()
+    }
+}
+
+#[pyclass(module = "crabwalk", frozen)]
+pub struct Negate {
+    pub name: Py<PyString>,
+}
+
+#[pymethods]
+impl Negate {
+    #[classattr]
+    fn __match_args__() -> (String,) {
+        ("name".to_string(),)
+    }
+
+    #[new]
+    #[pyo3(signature = (name, /))]
+    fn py_new(name: Py<PyString>) -> Self {
+        Self { name }
+    }
+
+    #[getter]
+    fn get_name(&self, py: Python<'_>) -> Py<PyString> {
+        self.name.clone_ref(py)
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let name = self.name.bind_borrowed(py);
+        Ok(format!("<Negate {}>", name.repr()?))
+    }
+
+    fn __getnewargs__(&self, py: Python<'_>) -> (Py<PyString>,) {
+        (self.name.clone_ref(py),)
+    }
+
+    fn __eq__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
+        self.name.bind(py).as_any().eq(other.name.bind(py))
+    }
+
+    fn __ne__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
+        self.name.bind(py).as_any().ne(other.name.bind(py))
+    }
+
+    fn __hash__(&self, py: Python<'_>) -> PyResult<isize> {
+        let elements = [
+            &Self::type_object(py).into_any(),
+            self.name.bind(py).as_any(),
+        ];
+        PyTuple::new(py, elements)?.hash()
+    }
+}
+
+impl Negate {
+    pub fn new(name: Py<PyString>) -> Self {
+        Self { name }
+    }
+
+    pub fn name(&self, py: Python<'_>) -> PyResult<PyBackedStr> {
+        self.name.bind_borrowed(py).extract::<PyBackedStr>()
+    }
+}
+
+#[derive(IntoPyObject, IntoPyObjectRef)]
 pub enum Selection {
-    Select(String),
-    Negate(String),
+    #[pyo3(transparent)]
+    Select(Py<Select>),
+    #[pyo3(transparent)]
+    Negate(Py<Negate>),
+}
+
+impl Selection {
+    fn clone_ref(&self, py: Python<'_>) -> Self {
+        match self {
+            Selection::Select(select) => Selection::Select(select.clone_ref(py)),
+            Selection::Negate(negate) => Selection::Negate(negate.clone_ref(py)),
+        }
+    }
+}
+
+impl FromPyObject<'_> for Selection {
+    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if let Ok(select) = ob.downcast::<Select>() {
+            Ok(Selection::Select(select.clone().unbind()))
+        } else if let Ok(negate) = ob.downcast::<Negate>() {
+            Ok(Selection::Negate(negate.clone().unbind()))
+        } else {
+            Err(DowncastError::new(ob, "Select | Negate").into())
+        }
+    }
+}
+
+impl Selection {
+    fn select(name: Bound<'_, PyString>) -> PyResult<Self> {
+        let select = Py::new(name.py(), Select::new(name.unbind()))?;
+        Ok(Self::Select(select))
+    }
+
+    fn negate(name: Bound<'_, PyString>) -> PyResult<Self> {
+        let negate = Py::new(name.py(), Negate::new(name.unbind()))?;
+        Ok(Self::Negate(negate))
+    }
+}
+
+#[pyclass(module = "crabwalk")]
+struct SelectionsView {
+    iter: Box<dyn Iterator<Item = Selection> + Send + Sync>,
+}
+
+impl SelectionsView {
+    fn new(selections: Vec<Selection>) -> Self {
+        Self {
+            iter: Box::new(selections.into_iter()),
+        }
+    }
+}
+
+#[pymethods]
+impl SelectionsView {
+    fn __iter__(self_: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        self_
+    }
+    fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        Ok(match self.iter.next() {
+            Some(item) => Some(item.into_pyobject(py)?.unbind()),
+            None => None,
+        })
+    }
+
+    fn __repr__<'py>(&self, py: Python<'py>) -> &Bound<'py, PyString> {
+        intern!(py, "<SelectionsView>")
+    }
 }
 
 #[pyclass(module = "crabwalk", mapping)]
-#[derive(Clone)]
 pub struct Types {
     types: Arc<Option<Py<PyDict>>>,
     pub selections: Vec<Selection>,
@@ -45,6 +227,15 @@ impl Types {
         };
         instance.update(py, initial, kwargs)?;
         Ok(instance)
+    }
+
+    fn selections<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, SelectionsView>> {
+        let selections: Vec<Selection> = self
+            .selections
+            .iter()
+            .map(|selection| selection.clone_ref(py))
+            .collect();
+        Bound::new(py, SelectionsView::new(selections))
     }
 
     pub fn __getitem__<'py>(
@@ -108,49 +299,32 @@ impl Types {
             .map(Into::into)
     }
 
-    pub fn __richcmp__<'py>(
-        self_: PyRef<'_, Self>,
-        py: Python<'py>,
-        other: &Bound<'py, PyMapping>,
-        op: CompareOp,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let equal = match op {
-            CompareOp::Eq => true,
-            CompareOp::Ne => false,
-            _ => return Ok(py.NotImplemented().into_bound(py)),
-        };
-        let notequal = !equal;
-
-        let self_obj = self_.into_pyobject(py)?;
-        let self_mapping = self_obj.downcast::<PyMapping>()?;
-
-        if self_mapping.len()? != other.len()? {
-            return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
+    fn __eq__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
+        if self.selections.len() != other.selections.len() {
+            return Ok(false)
         }
 
-        let items: PyResult<Vec<(Bound<'_, PyString>, Bound<'_, PySequence>)>> = self_mapping
-            .items()?
-            .iter()
-            .map(|t| t.extract())
-            .collect();
+        let types = self.types.as_ref().as_ref().unwrap().bind(py);
+        let other_types = other.types.as_ref().as_ref().unwrap().bind(py);
+        if types.ne(other_types)? {
+            return Ok(false);
+        }
 
-        for (name, globs) in items? {
-            let other_globs = match other.get_item(name) {
-                Ok(globs) => globs,
-                Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => {
-                    return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
+        for (selection, other_selection) in zip(&self.selections, &other.selections) {
+            use Selection::{Negate, Select};
+            match (selection, other_selection) {
+                (Select(_), Negate(_)) => return Ok(false),
+                (Negate(_), Select(_)) => return Ok(false),
+                (selection, other_selection) => {
+                    let selection = selection.into_pyobject(py)?;
+                    let other_selection = other_selection.into_pyobject(py)?;
+                    if selection.ne(other_selection)? {
+                        return Ok(false);
+                    }
                 }
-                Err(err) => return Err(err),
-            };
-            let other_globs: Bound<'_, PySequence> = match other_globs.extract() {
-                Ok(globs) => globs,
-                Err(_) => return Ok(notequal.into_pyobject(py)?.to_owned().into_any()),
-            };
-            if globs.ne(other_globs)? {
-                return Ok(notequal.into_pyobject(py)?.to_owned().into_any());
             }
         }
-        Ok(equal.into_pyobject(py)?.to_owned().into_any())
+        Ok(true)
     }
 
     pub fn __len__(&self, py: Python<'_>) -> usize {
@@ -162,7 +336,12 @@ impl Types {
     }
 
     pub fn __delitem__(&self, py: Python<'_>, name: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.types.as_ref().as_ref().unwrap().bind(py).del_item(name)
+        self.types
+            .as_ref()
+            .as_ref()
+            .unwrap()
+            .bind(py)
+            .del_item(name)
     }
 
     pub fn __setitem__(
@@ -195,12 +374,10 @@ impl Types {
                 self.__delitem__(py, key)?;
                 Ok(globs.into_pyobject(py)?.into_any())
             }
-            Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => {
-                match default {
-                    Maybe::Some(default) => Ok(default.into_pyobject(py)?),
-                    Maybe::Missing => Err(err),
-                }
-            }
+            Err(err) if err.is_instance(py, &py.get_type::<PyKeyError>()) => match default {
+                Maybe::Some(default) => Ok(default.into_pyobject(py)?),
+                Maybe::Missing => Err(err),
+            },
             Err(err) => Err(err),
         }
     }
@@ -238,12 +415,20 @@ impl Types {
         if let Ok(other) = other.downcast::<PyMapping>() {
             for name in other.try_iter()? {
                 let name = &name?;
-                self.__setitem__(py, &name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
+                self.__setitem__(
+                    py,
+                    &name.extract::<PyBackedStr>()?,
+                    other.get_item(name)?.downcast()?,
+                )?;
             }
         } else if other.hasattr("keys")? {
             for name in other.call_method0("keys")?.try_iter()? {
                 let name = &name?;
-                self.__setitem__(py, &name.extract::<PyBackedStr>()?, other.get_item(name)?.downcast()?)?;
+                self.__setitem__(
+                    py,
+                    &name.extract::<PyBackedStr>()?,
+                    other.get_item(name)?.downcast()?,
+                )?;
             }
         } else {
             for item in other.try_iter()? {
@@ -307,11 +492,7 @@ impl Types {
         }
         for definition in DEFAULT_TYPES.iter() {
             for glob in definition.globs() {
-                self.add(
-                    py,
-                    definition.name(),
-                    glob.into_pyobject(py)?.downcast()?,
-                )?
+                self.add(py, definition.name(), glob.into_pyobject(py)?.downcast()?)?
             }
         }
         Ok(())
@@ -320,59 +501,47 @@ impl Types {
     /// Select the file type given by `name`.
     ///
     /// If `name` is `all`, then all file types currently defined are selected.
-    pub fn select(&mut self, py: Python<'_>, name: &str) {
+    pub fn select(&mut self, py: Python<'_>, name: Bound<'_, PyString>) -> PyResult<()> {
         if name == "all" {
             for name in self.types.as_ref().as_ref().unwrap().bind(py).keys() {
-                self.selections.push(Selection::Select(name.to_string()));
+                self.selections
+                    .push(Selection::select(name.downcast_into()?)?);
             }
         } else {
-            self.selections.push(Selection::Select(name.to_string()));
+            self.selections.push(Selection::select(name)?);
         }
+        Ok(())
     }
 
     /// Ignore the file type given by `name`.
     ///
     /// If `name` is `all`, then all file types currently defined are negated.
-    pub fn negate(&mut self, py: Python<'_>, name: &str) {
+    pub fn negate(&mut self, py: Python<'_>, name: Bound<'_, PyString>) -> PyResult<()> {
         if name == "all" {
             for name in self.types.as_ref().as_ref().unwrap().bind(py).keys() {
-                self.selections.push(Selection::Negate(name.to_string()));
+                self.selections
+                    .push(Selection::negate(name.downcast_into()?)?);
             }
         } else {
-            self.selections.push(Selection::Negate(name.to_string()));
+            self.selections.push(Selection::negate(name)?);
         }
+        Ok(())
     }
 
-    fn __getnewargs__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyDict>,) {
-        (self.types.as_ref().as_ref().unwrap().bind(py).clone(),)
+    fn __getnewargs__(&self, py: Python<'_>) -> (Py<PyDict>,) {
+        (self.types.as_ref().as_ref().unwrap().clone_ref(py),)
     }
 
     fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        let selections: Vec<_> = self
-            .selections
-            .iter()
-            .map(|selection| match selection {
-                Selection::Select(name) => ("select", name),
-                Selection::Negate(name) => ("negate", name),
-            })
-            .collect();
         let state = PyDict::new(py);
-        state.set_item("selections", selections.into_pyobject(py)?)?;
-        Ok(state.into())
+        let selections = PyList::new(py, &self.selections)?;
+        state.set_item(intern!(py, "selections"), selections)?;
+        Ok(state.unbind())
     }
 
-    fn __setstate__(&mut self, py: Python<'_>, state: Py<PyDict>) -> PyResult<()> {
-        let state = state.bind(py);
-        let selections = <Bound<'_, PyAny>>::get_item(state, "selections")?;
-        let selections: Vec<(String, String)> = selections.extract()?;
-        self.selections = selections
-            .into_iter()
-            .map(|(case, name)| match case.as_ref() {
-                "select" => Ok(Selection::Select(name)),
-                "negate" => Ok(Selection::Negate(name)),
-                _ => Err(PyValueError::new_err("Invalid state")),
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+    fn __setstate__(&mut self, state: Bound<'_, PyDict>) -> PyResult<()> {
+        let selections = <Bound<'_, PyAny>>::get_item(&state, "selections")?;
+        self.selections = selections.extract()?;
         Ok(())
     }
 

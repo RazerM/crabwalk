@@ -108,7 +108,7 @@ def test_pickle() -> None:
     types.select("rust")
     t2 = pickle.loads(pickle.dumps(types))
     assert dict(types) == dict(t2)
-    assert t2.__getstate__() == {"selections": [("select", "rust")]}
+    assert list(types.selections()) == list(t2.selections())
 
 
 def test_get() -> None:
@@ -153,10 +153,10 @@ def test_items() -> None:
 
 
 def test_comparison_not_implemented() -> None:
-    assert Types().__lt__(object()) is NotImplemented
-    assert Types().__le__(object()) is NotImplemented
-    assert Types().__ge__(object()) is NotImplemented
-    assert Types().__gt__(object()) is NotImplemented
+    assert Types().__lt__(object()) is NotImplemented  # type: ignore[operator]
+    assert Types().__le__(object()) is NotImplemented  # type: ignore[operator]
+    assert Types().__ge__(object()) is NotImplemented  # type: ignore[operator]
+    assert Types().__gt__(object()) is NotImplemented  # type: ignore[operator]
 
 
 @pytest.mark.parametrize(
@@ -180,6 +180,18 @@ def test_not_equal(a: Types, b: Types) -> None:
 )
 def test_equal(a: Types, b: Types) -> None:
     assert a == b
+
+
+def test_equality_selections():
+    a = Types()
+    a.add_defaults()
+    b = Types()
+    b.add_defaults()
+    assert a == b
+    a.select("py")
+    assert a != b
+    b.select("rust")
+    assert a != b
 
 
 def test_clear() -> None:
