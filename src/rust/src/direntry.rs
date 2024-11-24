@@ -30,8 +30,8 @@ impl DirEntry {
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         // Convert path to a PyString and use repr so the output
         // contains surrogate escapes.
-        let path = self.inner.path().as_os_str().to_object(py);
-        Ok(format!("<DirEntry {}>", path.bind(py).repr()?))
+        let path = self.inner.path().as_os_str().into_pyobject(py)?;
+        Ok(format!("<DirEntry {}>", path.repr()?))
     }
 
     #[getter]
@@ -90,7 +90,7 @@ impl DirEntry {
                     .get(py)
                     .unwrap()
                     .bind(py)
-                    .call((self.inner.path(),), Some(&kwargs.into_py_dict_bound(py)))?;
+                    .call((self.inner.path(),), Some(&kwargs.into_py_dict(py)?))?;
                 self.stat = Some(stat.clone().into());
                 Ok(stat.into())
             }

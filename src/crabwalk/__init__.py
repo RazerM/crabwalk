@@ -1,4 +1,4 @@
-from ._lib import DirEntry, Types, Walk
+from ._lib import DirEntry, Negate, Select, Types, Walk
 from ._types import (
     GlobError,
     InvalidDefinitionError,
@@ -24,9 +24,11 @@ __all__ = (
     "GlobError",
     "InvalidDefinitionError",
     "LoopError",
+    "Negate",
     "Override",
     "Overrides",
     "PartialError",
+    "Select",
     "Types",
     "UnrecognizedFileTypeError",
     "Walk",
