@@ -1,7 +1,7 @@
 import os
 import sys
 from collections.abc import Iterable, Iterator, MutableSequence, Sequence
-from typing import NamedTuple, Optional, Union, overload
+from typing import NamedTuple, TypeAlias, overload
 
 
 def _display(s: str) -> str:
@@ -12,9 +12,9 @@ class WalkError(Exception):
     def __init__(
         self,
         *args: object,
-        line: Optional[int] = None,
-        path: Optional[str] = None,
-        depth: Optional[int] = None,
+        line: int | None = None,
+        path: str | None = None,
+        depth: int | None = None,
     ) -> None:
         super().__init__(*args)
         self.line = line
@@ -41,9 +41,9 @@ class LoopError(WalkError):
         *,
         ancestor: str,
         child: str,
-        line: Optional[int] = None,
-        path: Optional[str] = None,
-        depth: Optional[int] = None,
+        line: int | None = None,
+        path: str | None = None,
+        depth: int | None = None,
     ) -> None:
         super().__init__(line=line, path=path, depth=depth)
         self.ancestor = ancestor
@@ -61,10 +61,10 @@ class GlobError(WalkError):
         self,
         message: str,
         *,
-        glob: Optional[str] = None,
-        line: Optional[int] = None,
-        path: Optional[str] = None,
-        depth: Optional[int] = None,
+        glob: str | None = None,
+        line: int | None = None,
+        path: str | None = None,
+        depth: int | None = None,
     ) -> None:
         super().__init__(message, line=line, path=path, depth=depth)
         self.glob = glob
@@ -132,7 +132,7 @@ def coerce_override(v: object) -> Override:
     return Override._make(v)
 
 
-OverrideT = Union[str, tuple[str, bool]]
+OverrideT: TypeAlias = str | tuple[str, bool]
 
 
 class Overrides(MutableSequence[OverrideT]):
@@ -160,11 +160,12 @@ class Overrides(MutableSequence[OverrideT]):
         self,
         overrides: Iterable[OverrideT] = (),
         *,
-        path: "Union[str, os.PathLike[str]]",
+        path: str | os.PathLike[str],
     ) -> None:
         path = os.fspath(path)
         if not isinstance(path, str):
-            msg = (
+            # Only reachable for untyped callers passing bytes paths.
+            msg = (  # type: ignore[unreachable]
                 "path must be a str object or an os.PathLike object returning "
                 f"str, not {type(path)}"
             )
@@ -184,7 +185,7 @@ class Overrides(MutableSequence[OverrideT]):
     @overload
     def __getitem__(self, index: slice) -> "Overrides": ...
 
-    def __getitem__(self, index: Union[int, slice]) -> "Union[Override, Overrides]":
+    def __getitem__(self, index: int | slice) -> "Override | Overrides":
         if isinstance(index, slice):
             return Overrides(self._overrides[index], path=self._path)
         else:
@@ -197,7 +198,7 @@ class Overrides(MutableSequence[OverrideT]):
     def __setitem__(self, index: slice, value: Iterable[OverrideT]) -> None: ...
 
     def __setitem__(
-        self, index: Union[int, slice], value: Union[OverrideT, Iterable[OverrideT]]
+        self, index: int | slice, value: OverrideT | Iterable[OverrideT]
     ) -> None:
         if isinstance(index, slice):
             self._overrides[index] = (coerce_override(o) for o in value)
@@ -210,7 +211,7 @@ class Overrides(MutableSequence[OverrideT]):
     @overload
     def __delitem__(self, index: slice) -> None: ...
 
-    def __delitem__(self, index: Union[int, slice]) -> None:
+    def __delitem__(self, index: int | slice) -> None:
         del self._overrides[index]
 
     def __len__(self) -> int:

@@ -1,7 +1,7 @@
 import os
-import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import TypeAlias
 from unittest.mock import Mock
 
 import pytest
@@ -9,12 +9,6 @@ import pytest
 from crabwalk import DirEntry, Overrides, Types, Walk
 
 from .tree import Directory, File, Symlink
-
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias
-else:
-    from typing_extensions import TypeAlias
-
 
 WalkPaths: TypeAlias = Callable[[Walk], Iterator[str]]
 WalkEntries: TypeAlias = Callable[[Walk], Iterator[DirEntry]]

@@ -182,7 +182,7 @@ def test_equal(a: Types, b: Types) -> None:
     assert a == b
 
 
-def test_equality_selections():
+def test_equality_selections() -> None:
     a = Types()
     a.add_defaults()
     b = Types()

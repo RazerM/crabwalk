@@ -11,6 +11,9 @@ from uuid import uuid4
 
 import nox
 
+PYPROJECT = nox.project.load_toml("pyproject.toml")
+PYTHON_VERSIONS = nox.project.python_versions(PYPROJECT)
+
 nox.options.reuse_existing_virtualenvs = True
 nox.options.default_venv_backend = "uv"
 
@@ -62,7 +65,7 @@ def docs(session: nox.Session) -> None:
     session.run("doc8", "docs/")
 
 
-@nox.session(python=["3.9", "3.10", "3.11", "3.12", "3.13"])
+@nox.session(python=PYTHON_VERSIONS)
 def tests(session: nox.Session) -> None:
     prof_location = Path(".rust-cov", str(uuid4())).absolute()
     rustflags = session.env.get("RUSTFLAGS", "")
