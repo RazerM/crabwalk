@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import warnings
+import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TypeAlias
@@ -981,3 +982,20 @@ gc.collect()
 assert ref() is None
 """
     subprocess.run([sys.executable, "-c", code, str(tmp_path)], check=True)
+
+
+@pytest.mark.parametrize(
+    "attribute", ["paths", "global_ignore_files", "custom_ignore_filenames"]
+)
+def test_list_cycle_collected(attribute: str) -> None:
+    class Holder:
+        walk: Walk
+
+    holder = Holder()
+    walk = Walk(".")
+    holder.walk = walk
+    getattr(walk, attribute).append(holder)
+    ref = weakref.ref(holder)
+    del walk, holder
+    gc.collect()
+    assert ref() is None

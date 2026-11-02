@@ -220,11 +220,8 @@ impl Walk {
     }
 
     #[getter]
-    fn paths(&self, py: Python<'_>) -> Py<PyList> {
-        self.paths
-            .as_ref()
-            .map(|paths| paths.clone_ref(py))
-            .unwrap()
+    fn paths(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        not_cleared(&self.paths).map(|paths| paths.clone_ref(py))
     }
 
     #[getter]
@@ -276,19 +273,15 @@ impl Walk {
     }
 
     #[getter]
-    fn global_ignore_files(&self, py: Python<'_>) -> Py<PyList> {
-        self.global_ignore_files
-            .as_ref()
+    fn global_ignore_files(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        not_cleared(&self.global_ignore_files)
             .map(|global_ignore_files| global_ignore_files.clone_ref(py))
-            .unwrap()
     }
 
     #[getter]
-    fn custom_ignore_filenames(&self, py: Python<'_>) -> Py<PyList> {
-        self.custom_ignore_filenames
-            .as_ref()
+    fn custom_ignore_filenames(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        not_cleared(&self.custom_ignore_filenames)
             .map(|custom_ignore_filenames| custom_ignore_filenames.clone_ref(py))
-            .unwrap()
     }
 
     #[getter]
@@ -667,7 +660,7 @@ impl Walk {
     }
 
     fn build(&mut self, py: Python<'_>) -> PyResult<Entries> {
-        let paths = self.paths.as_ref().unwrap().bind(py);
+        let paths = not_cleared(&self.paths)?.bind(py);
         if paths.is_empty() {
             return Err(PyTypeError::new_err("Must specify at least one path"));
         }
@@ -705,19 +698,13 @@ impl Walk {
             .same_file_system(self.same_file_system)
             .skip_stdout(self.skip_stdout);
 
-        for path in fspath_list(self.global_ignore_files.as_ref().unwrap().bind(py))? {
+        for path in fspath_list(not_cleared(&self.global_ignore_files)?.bind(py))? {
             if let Some(err) = builder.add_ignore(path) {
                 self.convert_and_call_onerror(py, err)?;
             }
         }
 
-        for path in self
-            .custom_ignore_filenames
-            .as_ref()
-            .unwrap()
-            .bind(py)
-            .iter()
-        {
+        for path in not_cleared(&self.custom_ignore_filenames)?.bind(py).iter() {
             builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
@@ -890,6 +877,14 @@ impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
             SortValue::Bool(sort) => Ok(PyBool::new(py, *sort).into_any()),
         }
     }
+}
+
+/// A field that is only None after `__clear__`. A cleared object isn't
+/// expected to work normally, but it shouldn't panic either.
+fn not_cleared<T>(field: &Option<T>) -> PyResult<&T> {
+    field
+        .as_ref()
+        .ok_or_else(|| PyRuntimeError::new_err("Walk was cleared by the garbage collector"))
 }
 
 /// Convert a panic from the walker into an exception if it was caused by an
