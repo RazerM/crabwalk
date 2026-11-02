@@ -3,16 +3,15 @@
 use std::cmp::Ordering;
 use std::ffi::OsString;
 use std::path::Path;
-use std::ptr;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
-use pyo3::exceptions::{PyException, PyRuntimeError, PyTypeError};
+use pyo3::exceptions::{PyException, PyResourceWarning, PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::sync::GILOnceCell;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyList, PySequence, PyTraceback, PyTuple, PyType};
-use pyo3::{ffi, BoundObject, PyTraverseError, PyVisit};
+use pyo3::{BoundObject, PyTraverseError, PyVisit};
 
 use crate::direntry::DirEntry;
 use crate::error::IgnoreError;
@@ -23,8 +22,8 @@ mod error;
 mod types;
 mod util;
 
-static TYPES_MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
-static OS_STAT: GILOnceCell<PyObject> = GILOnceCell::new();
+static TYPES_MODULE: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
+static OS_STAT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
 /// The `crabwalk._types` module, imported on first use to avoid a circular
 /// import (it imports this module).
@@ -58,8 +57,8 @@ pub struct Walk {
     max_filesize: Option<u64>,
     global_ignore_files: Option<Py<PyList>>, // Only None after tp_clear
     custom_ignore_filenames: Option<Py<PyList>>, // Only None after tp_clear
-    overrides: Option<PyObject>,
-    types: Option<PyObject>,
+    overrides: Option<Py<PyAny>>,
+    types: Option<Py<PyAny>>,
     hidden: bool,
     parents: bool,
     ignore: bool,
@@ -71,8 +70,8 @@ pub struct Walk {
     sort: SortValue,
     same_file_system: bool,
     skip_stdout: bool,
-    filter_entry: Option<PyObject>,
-    onerror: Option<PyObject>,
+    filter_entry: Option<Py<PyAny>>,
+    onerror: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -125,8 +124,8 @@ impl Walk {
         sort: Option<Bound<'py, PyAny>>,
         same_file_system: bool,
         skip_stdout: bool,
-        filter_entry: Option<PyObject>,
-        onerror: Option<PyObject>,
+        filter_entry: Option<Py<PyAny>>,
+        onerror: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let paths = PyList::new(py, paths)?;
         let global_ignore_files = match global_ignore_files {
@@ -424,19 +423,19 @@ impl Walk {
     }
 
     #[setter]
-    fn set_filter_entry(&mut self, value: Option<PyObject>) -> PyResult<()> {
+    fn set_filter_entry(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.filter_entry = value;
         Ok(())
     }
 
     #[getter]
-    fn onerror(&self, py: Python<'_>) -> Option<PyObject> {
+    fn onerror(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.onerror.as_ref().map(|onerror| onerror.clone_ref(py))
     }
 
     #[setter]
-    fn set_onerror(&mut self, value: Option<PyObject>) -> PyResult<()> {
+    fn set_onerror(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.onerror = value;
         Ok(())
@@ -483,7 +482,7 @@ impl Walk {
             _ => unreachable!(),
         };
 
-        while let Some(dent) = py.allow_threads(|| walk.next()) {
+        while let Some(dent) = py.detach(|| walk.next()) {
             if let Some(err) = PyErr::take(py) {
                 // Don't pass user-caused errors through onerror, raise directly
                 return Err(err);
@@ -618,7 +617,7 @@ impl Walk {
             let follow_symlinks = self.follow_symlinks;
             builder.filter_entry(move |dent| {
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     filter_entry
                         .call1(py, (py_dent,))
                         .and_then(|result| result.is_truthy(py))
@@ -639,8 +638,8 @@ impl Walk {
             SortValue::Callable(sort) => {
                 let sort = sort.clone_ref(py);
                 builder.sort_by_file_path(move |a, b| {
-                    fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
-                        Python::with_gil(|py| {
+                    fn inner(sort_key: &Py<PyAny>, a: &Path, b: &Path) -> PyResult<Ordering> {
+                        Python::attach(|py| {
                             let a = sort_key.call1(py, (a.as_os_str(),))?;
                             let b = sort_key.call1(py, (b.as_os_str(),))?;
 
@@ -657,7 +656,7 @@ impl Walk {
                     }
 
                     inner(&sort, a, b).unwrap_or_else(|err| {
-                        Python::with_gil(|py| {
+                        Python::attach(|py| {
                             if !PyErr::occurred(py) {
                                 err.restore(py);
                             }
@@ -739,28 +738,13 @@ impl Walk {
 impl Drop for Walk {
     fn drop(&mut self) {
         if matches!(self.state, State::Started(_)) {
-            Python::with_gil(|py| {
-                // SAFETY: We're borrowing PyExc_ResourceWarning so need to incref
-                let resource_warning_type =
-                    unsafe { Bound::from_borrowed_ptr(py, ffi::PyExc_ResourceWarning) };
-
-                // SAFETY: We're borrowing PyExc_Warning so need to incref
-                let warning_type = unsafe { Bound::from_borrowed_ptr(py, ffi::PyExc_Warning) };
-
+            Python::attach(|py| {
                 // Note: Until pyo3 lets us implement tp_finalize, we can't use
                 // PyErr_ResourceWarning, include the repr in the message, or pass the instance to
                 // PyErr_WriteUnraisable for additional context.
-                if let Err(err) = PyErr::warn(
-                    py,
-                    &resource_warning_type,
-                    ffi::c_str!("Unclosed Walk iterator"),
-                    1,
-                ) {
-                    if err.matches(py, warning_type).unwrap_or(false) {
-                        err.restore(py);
-                        // SAFETY: NULL is an acceptable pointer when there is no available context.
-                        unsafe { ffi::PyErr_WriteUnraisable(ptr::null_mut()) };
-                    }
+                let category = py.get_type::<PyResourceWarning>();
+                if let Err(err) = PyErr::warn(py, &category, c"Unclosed Walk iterator", 1) {
+                    err.write_unraisable(py, None);
                 }
             });
         }
@@ -768,7 +752,7 @@ impl Drop for Walk {
 }
 
 enum SortValue {
-    Callable(PyObject),
+    Callable(Py<PyAny>),
     Bool(bool),
 }
 

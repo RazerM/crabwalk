@@ -2,7 +2,6 @@ use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 
 use crate::types_module;
-use crate::util::InfallibleResult;
 
 pub struct IgnoreError(ignore::Error);
 
@@ -20,7 +19,7 @@ impl From<Box<ignore::Error>> for IgnoreError {
 
 impl From<IgnoreError> for PyErr {
     fn from(error: IgnoreError) -> Self {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let types_mod = match types_module(py) {
                 Ok(types_mod) => types_mod,
                 Err(err) => return err,
@@ -32,7 +31,8 @@ impl From<IgnoreError> for PyErr {
                         Err(err) => return err,
                         Ok(error_type) => error_type,
                     };
-                    let kwargs = [("glob", InfallibleResult::into_ok(glob.into_pyobject(py)))];
+                    let Ok(glob) = glob.into_pyobject(py);
+                    let kwargs = [("glob", glob)];
                     match loop_error_type.call((err,), Some(&kwargs.into_py_dict(py).unwrap())) {
                         Err(err) => err,
                         Ok(err) => PyErr::from_value(err),
@@ -43,7 +43,10 @@ impl From<IgnoreError> for PyErr {
                         Err(err) => return err,
                         Ok(error_type) => error_type,
                     };
-                    let kwargs = [("ancestor", ancestor), ("child", child)];
+                    let kwargs = [
+                        ("ancestor", ancestor.into_os_string()),
+                        ("child", child.into_os_string()),
+                    ];
                     match loop_error_type.call((), Some(&kwargs.into_py_dict(py).unwrap())) {
                         Err(err) => err,
                         Ok(err) => PyErr::from_value(err),
@@ -68,7 +71,7 @@ impl From<IgnoreError> for PyErr {
                 ignore::Error::WithPath { err, path } => {
                     let py_err = PyErr::from(IgnoreError::from(err));
                     let value = py_err.into_value(py);
-                    if let Err(seterr) = value.setattr(py, "path", path) {
+                    if let Err(seterr) = value.setattr(py, "path", path.into_os_string()) {
                         return seterr;
                     }
                     PyErr::from_value(value.extract(py).unwrap())

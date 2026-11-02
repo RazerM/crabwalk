@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::ffi::OsString;
 
 use pyo3::ffi;
@@ -19,15 +18,4 @@ pub fn fspath_list(paths: &Bound<'_, PyList>) -> PyResult<Vec<OsString>> {
         .iter()
         .map(|path| fspath(&path).and_then(|p| p.extract()))
         .collect()
-}
-
-pub(crate) trait InfallibleResult<T> {
-    fn into_ok(self) -> T;
-}
-
-impl<T> InfallibleResult<T> for Result<T, Infallible> {
-    fn into_ok(self) -> T {
-        // Safety: this result is infallible
-        unsafe { self.unwrap_unchecked() }
-    }
 }

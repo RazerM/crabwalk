@@ -10,10 +10,6 @@ rust-version = { workspace = true }
 ignore = "0.4.34"
 pyo3 = { workspace = true }
 
-[features]
-extension-module = ["pyo3/extension-module"]
-default = ["extension-module"]
-
 [lib]
 name = "crabwalk_rust"
 crate-type = ["cdylib"]
