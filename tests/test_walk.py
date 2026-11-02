@@ -875,12 +875,44 @@ def test_sort_key_uses_less_than(tree_path: Path, walk_paths: WalkPaths) -> None
         "root",
         File("a"),
         File("b"),
+        File("c"),
+        File("d"),
     ),
     chdir=True,
 )
-def test_sort_key_error(tree_path: Path, walk_paths: WalkPaths) -> None:
+@pytest.mark.parametrize("with_filter_entry", [False, True])
+def test_sort_key_error(
+    tree_path: Path, walk_paths: WalkPaths, with_filter_entry: bool
+) -> None:
     def key(path: str) -> str:
-        raise ZeroDivisionError
+        raise ZeroDivisionError(path)
 
-    with pytest.raises(ZeroDivisionError):
-        list(walk_paths(Walk("root", sort=key)))
+    walk = Walk("root", sort=key)
+    if with_filter_entry:
+        walk.filter_entry = lambda entry: True
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        list(walk_paths(walk))
+    assert exc_info.value.__context__ is None
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+        File("c"),
+    ),
+    chdir=True,
+)
+def test_filter_entry_error(tree_path: Path, walk_paths: WalkPaths) -> None:
+    calls = []
+
+    def filter_entry(entry: DirEntry) -> bool:
+        calls.append(entry.path)
+        raise ZeroDivisionError(entry.path)
+
+    walk = Walk("root", sort=True, filter_entry=filter_entry)
+    with pytest.raises(ZeroDivisionError, match="root/a"):
+        list(walk_paths(walk))
+    # Python isn't called again once a callback has raised.
+    assert calls == ["root/a"]

@@ -11,11 +11,13 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
 use pyo3::{BoundObject, PyTraverseError, PyVisit};
 
+use crate::callback::CallbackError;
 use crate::direntry::DirEntry;
 use crate::error::IgnoreError;
 use crate::sort::KeyComparator;
 use crate::util::{fspath, fspath_list};
 
+mod callback;
 mod direntry;
 mod error;
 mod sort;
@@ -73,6 +75,7 @@ pub struct Walk {
     skip_stdout: bool,
     filter_entry: Option<Py<PyAny>>,
     onerror: Option<Py<PyAny>>,
+    callback_error: CallbackError,
 }
 
 #[pymethods]
@@ -167,6 +170,7 @@ impl Walk {
             skip_stdout,
             filter_entry,
             onerror,
+            callback_error: CallbackError::default(),
         };
         instance.set_overrides(overrides)?;
         instance.set_types(types)?;
@@ -501,7 +505,7 @@ impl Walk {
         };
 
         while let Some(dent) = py.detach(|| walk.next()) {
-            if let Some(err) = PyErr::take(py) {
+            if let Some(err) = self.callback_error.take() {
                 // Don't pass user-caused errors through onerror, raise directly
                 return Err(err);
             }
@@ -532,7 +536,7 @@ impl Walk {
         // Release resources as soon as iteration finishes, like os.scandir.
         self.state = State::Closed;
 
-        if let Some(err) = PyErr::take(py) {
+        if let Some(err) = self.callback_error.take() {
             // Don't pass user-caused errors through onerror, raise directly
             return Err(err);
         }
@@ -647,19 +651,19 @@ impl Walk {
 
         if let Some(filter_entry) = self.filter_entry.as_ref().map(|f| f.clone_ref(py)) {
             let follow_symlinks = self.follow_symlinks;
+            let callback_error = self.callback_error.clone();
             builder.filter_entry(move |dent| {
+                if callback_error.is_set() {
+                    return true;
+                }
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
                 Python::attach(|py| {
                     filter_entry
                         .call1(py, (py_dent,))
                         .and_then(|result| result.is_truthy(py))
                         .unwrap_or_else(|err| {
-                            if !PyErr::occurred(py) {
-                                err.restore(py);
-                            }
-
-                            // Return true so that we reach the __next__ method where we can return
-                            // the error can be raised
+                            callback_error.set(err);
+                            // Keep the entry so the walker returns to __next__ soon.
                             true
                         })
                 })
@@ -668,7 +672,7 @@ impl Walk {
 
         match &self.sort {
             SortValue::Callable(key) => {
-                let comparator = KeyComparator::new(key.clone_ref(py));
+                let comparator = KeyComparator::new(key.clone_ref(py), self.callback_error.clone());
                 builder.sort_by_file_path(move |a, b| comparator.compare(a, b));
             }
             SortValue::Bool(true) => {

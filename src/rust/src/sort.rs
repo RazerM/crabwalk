@@ -6,6 +6,8 @@ use std::sync::{Mutex, PoisonError};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 
+use crate::callback::CallbackError;
+
 /// Compares paths using a Python key function, like `sorted(key=...)`.
 ///
 /// The `ignore` crate sorts one directory at a time using a comparison
@@ -14,6 +16,7 @@ use pyo3::sync::MutexExt;
 pub struct KeyComparator {
     key: Py<PyAny>,
     cache: Mutex<KeyCache>,
+    error: CallbackError,
 }
 
 #[derive(Default)]
@@ -23,20 +26,21 @@ struct KeyCache {
 }
 
 impl KeyComparator {
-    pub fn new(key: Py<PyAny>) -> Self {
+    pub fn new(key: Py<PyAny>, error: CallbackError) -> Self {
         Self {
             key,
             cache: Mutex::default(),
+            error,
         }
     }
 
     pub fn compare(&self, a: &Path, b: &Path) -> Ordering {
+        if self.error.is_set() {
+            return a.cmp(b);
+        }
         Python::attach(|py| {
             self.try_compare(py, a, b).unwrap_or_else(|err| {
-                // Walk.__next__ raises this once the walker returns.
-                if !PyErr::occurred(py) {
-                    err.restore(py);
-                }
+                self.error.set(err);
                 a.cmp(b)
             })
         })
