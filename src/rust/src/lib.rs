@@ -6,11 +6,11 @@ use std::path::Path;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
-use pyo3::exceptions::{PyException, PyResourceWarning, PyRuntimeError, PyTypeError};
+use pyo3::exceptions::{PyResourceWarning, PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyBool, PyList, PySequence, PyTraceback, PyTuple, PyType};
+use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
 use pyo3::{BoundObject, PyTraverseError, PyVisit};
 
 use crate::direntry::DirEntry;
@@ -464,9 +464,9 @@ impl Walk {
     #[pyo3(signature = (_exc_type, _exc_val, _exc_tb))]
     fn __exit__(
         &mut self,
-        _exc_type: Option<&Bound<'_, PyType>>,
-        _exc_val: Option<&Bound<'_, PyException>>,
-        _exc_tb: Option<&Bound<'_, PyTraceback>>,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc_val: &Bound<'_, PyAny>,
+        _exc_tb: &Bound<'_, PyAny>,
     ) {
         self.close();
     }
@@ -476,10 +476,12 @@ impl Walk {
     }
 
     fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<DirEntry>> {
-        self.ensure_started(py)?;
-        let walk = match &mut self.state {
-            State::Started(walk) => walk,
-            _ => unreachable!(),
+        if let State::Unopened | State::Opened = self.state {
+            self.state = State::Started(Box::new(self.build(py)?));
+        }
+        let State::Started(walk) = &mut self.state else {
+            // Like other iterators, keep raising StopIteration once closed.
+            return Ok(None);
         };
 
         while let Some(dent) = py.detach(|| walk.next()) {
@@ -502,6 +504,9 @@ impl Walk {
                 }
             }
         }
+
+        // Release resources as soon as iteration finishes, like os.scandir.
+        self.state = State::Closed;
 
         if let Some(err) = PyErr::take(py) {
             // Don't pass user-caused errors through onerror, raise directly
@@ -713,18 +718,6 @@ impl Walk {
         }
 
         Ok(builder.build())
-    }
-
-    fn ensure_started(&mut self, py: Python<'_>) -> PyResult<()> {
-        match &self.state {
-            State::Unopened | State::Opened => {
-                self.state = State::Started(Box::new(self.build(py)?));
-            }
-            State::Closed => return Err(PyRuntimeError::new_err("Walk is closed")),
-            State::Started(_) => (),
-        };
-        debug_assert!(matches!(self.state, State::Started(_)));
-        Ok(())
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {

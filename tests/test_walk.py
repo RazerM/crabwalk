@@ -1,4 +1,6 @@
+import gc
 import os
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TypeAlias
@@ -659,3 +661,59 @@ def test_standard_filters() -> None:
 def test_paths(paths: list[str]) -> None:
     walk = Walk(*paths)
     assert walk.paths == paths
+
+
+def test_exit_propagates_base_exception() -> None:
+    with pytest.raises(KeyboardInterrupt), Walk("."):
+        raise KeyboardInterrupt
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_exhausted_walk_is_closed(tree_path: Path) -> None:
+    walk = Walk("root")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert len(list(walk)) == 2
+        del walk
+        gc.collect()
+    assert caught == []
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_unclosed_walk_warns(tree_path: Path) -> None:
+    walk = Walk("root")
+    next(walk)
+    with pytest.warns(ResourceWarning, match="Unclosed Walk iterator"):
+        del walk
+        gc.collect()
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_next_after_close(tree_path: Path) -> None:
+    with Walk("root") as walk:
+        next(walk)
+        walk.close()
+        with pytest.raises(StopIteration):
+            next(walk)
+
+    with Walk("root") as walk:
+        assert len(list(walk)) == 2
+        assert list(walk) == []

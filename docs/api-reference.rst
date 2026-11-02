@@ -7,9 +7,10 @@ API Reference
 
     Recursive directory iterator which yields :class:`DirEntry` objects.
 
-    If ``Walk`` is not closed (either by using a ``with`` statement or calling
-    :meth:`close` explicitly) then a :class:`ResourceWarning` will be emitted
-    in its destructor.
+    Like :func:`os.scandir`, ``Walk`` closes itself once iteration is
+    finished. If it is not exhausted or closed (either by using a ``with``
+    statement or calling :meth:`close` explicitly) then a
+    :class:`ResourceWarning` will be emitted in its destructor.
 
     :param paths: Paths to iterate recursively.
     :type paths: typing.Union[str, os.PathLike[str]]
@@ -95,7 +96,8 @@ API Reference
 
     .. method:: close() -> None
 
-        Close the iterator and free acquired resources
+        Close the iterator and free acquired resources. Further iteration
+        raises :exc:`StopIteration`.
 
         It is recommended to use a ``with`` statement instead.
 
