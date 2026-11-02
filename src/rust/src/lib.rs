@@ -2,7 +2,8 @@
 
 use std::any::Any;
 use std::ffi::OsString;
-use std::panic::{self, AssertUnwindSafe};
+use std::mem;
+use std::panic;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
@@ -11,16 +12,23 @@ use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
-use pyo3::{BoundObject, PyTraverseError, PyVisit};
+use pyo3::{BoundObject, PyTraverseError, PyVisit, ffi};
 
 use crate::callback::CallbackError;
 use crate::direntry::DirEntry;
+use crate::entries::Entries;
 use crate::error::IgnoreError;
 use crate::sort::KeyComparator;
 use crate::util::{fspath, fspath_list};
 
+// Entries are allocated by walker threads and freed by the consumer, which
+// mimalloc handles much better than some system allocators.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod callback;
 mod direntry;
+mod entries;
 mod error;
 mod sort;
 mod types;
@@ -48,7 +56,7 @@ fn check_instance(value: &Bound<'_, PyAny>, type_name: &str, msg: &'static str) 
 enum State {
     Unopened,
     Opened,
-    Started(Box<ignore::Walk>),
+    Started(Box<Entries>),
     Closed,
 }
 
@@ -479,55 +487,63 @@ impl Walk {
     /// Close the iterator and free acquired resources
     ///
     /// It is recommended to use a ``with`` statement instead.
-    fn close(&mut self) {
-        self.state = State::Closed;
+    fn close(&mut self, py: Python<'_>) {
+        if let State::Started(entries) = mem::replace(&mut self.state, State::Closed) {
+            entries.close(py);
+        }
     }
 
     #[pyo3(signature = (_exc_type, _exc_val, _exc_tb))]
     fn __exit__(
         &mut self,
+        py: Python<'_>,
         _exc_type: &Bound<'_, PyAny>,
         _exc_val: &Bound<'_, PyAny>,
         _exc_tb: &Bound<'_, PyAny>,
     ) {
-        self.close();
+        self.close(py);
     }
 
     fn __iter__(self_: PyRef<'_, Self>) -> PyRef<'_, Self> {
         self_
     }
 
-    fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<DirEntry>> {
+    fn __next__<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, DirEntry>>> {
         if let State::Unopened | State::Opened = self.state {
             self.state = State::Started(Box::new(self.build(py)?));
         }
-        let State::Started(walk) = &mut self.state else {
-            // Like other iterators, keep raising StopIteration once closed.
-            return Ok(None);
-        };
 
         loop {
-            // Sorting with a Python key that doesn't define a total order can
-            // make Rust's sort panic.
-            let next = py.detach(|| panic::catch_unwind(AssertUnwindSafe(|| walk.next())));
-            let dent = match next {
-                Ok(Some(dent)) => dent,
-                Ok(None) => break,
-                Err(payload) => {
+            let State::Started(entries) = &mut self.state else {
+                // Like other iterators, keep raising StopIteration once closed.
+                return Ok(None);
+            };
+
+            let Some(result) = entries.pop() else {
+                // Don't pass user-caused errors through onerror, raise directly
+                if let Some(err) = self.callback_error.take() {
+                    return Err(err);
+                }
+                if entries.is_finished() {
+                    // Release resources as soon as iteration finishes, like os.scandir.
+                    self.state = State::Closed;
+                    return Ok(None);
+                }
+                // Sorting with a Python key that doesn't define a total order
+                // can make Rust's sort panic.
+                let callback_error = &self.callback_error;
+                let filled = py.detach(|| entries.fill(callback_error));
+                if let Err(payload) = filled {
                     self.state = State::Closed;
                     return Err(self
                         .callback_error
                         .take()
                         .unwrap_or_else(|| walk_panic_error(payload)));
                 }
+                continue;
             };
 
-            if let Some(err) = self.callback_error.take() {
-                // Don't pass user-caused errors through onerror, raise directly
-                return Err(err);
-            }
-
-            match dent {
+            match result {
                 Ok(dent) => {
                     if let (Some(err), Some(onerror)) = (dent.error(), &self.onerror) {
                         convert_and_call_onerror(onerror.bind(py), err.clone())?;
@@ -540,7 +556,13 @@ impl Walk {
                     {
                         continue;
                     }
-                    return Ok(Some(DirEntry::new(dent, self.follow_symlinks)));
+                    let entry = Bound::new(py, DirEntry::new(dent, self.follow_symlinks))?;
+                    // pyo3 makes every pyclass support garbage collection, but
+                    // DirEntry can't be part of a reference cycle. Untracking
+                    // it makes lists of entries cheaper for the collector.
+                    // SAFETY: entry is a valid object.
+                    unsafe { ffi::PyObject_GC_UnTrack(entry.as_ptr().cast()) };
+                    return Ok(Some(entry));
                 }
                 Err(err) => {
                     if let Some(onerror) = self.onerror.as_ref() {
@@ -549,16 +571,6 @@ impl Walk {
                 }
             }
         }
-
-        // Release resources as soon as iteration finishes, like os.scandir.
-        self.state = State::Closed;
-
-        if let Some(err) = self.callback_error.take() {
-            // Don't pass user-caused errors through onerror, raise directly
-            return Err(err);
-        }
-
-        Ok(None)
     }
 
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
@@ -611,7 +623,7 @@ impl Walk {
         Ok(())
     }
 
-    fn build(&mut self, py: Python<'_>) -> PyResult<ignore::Walk> {
+    fn build(&mut self, py: Python<'_>) -> PyResult<Entries> {
         let paths = self.paths.as_ref().unwrap().bind(py);
         if paths.is_empty() {
             return Err(PyTypeError::new_err("Must specify at least one path"));
@@ -739,7 +751,9 @@ impl Walk {
             builder.types(types);
         }
 
-        Ok(builder.build())
+        let has_callbacks =
+            self.filter_entry.is_some() || matches!(self.sort, SortValue::Callable(_));
+        Ok(Entries::sequential(builder.build(), !has_callbacks))
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {

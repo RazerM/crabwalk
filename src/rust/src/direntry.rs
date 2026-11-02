@@ -1,17 +1,18 @@
-use std::ffi::OsStr;
-
 use pyo3::prelude::*;
-use pyo3::types::IntoPyDict;
-use pyo3::{PyTraverseError, PyVisit};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{IntoPyDict, PyString};
 
 use crate::OS_STAT;
+use crate::util::fsdecode;
 
-#[pyclass(module = "crabwalk")]
+// Frozen and without __traverse__ (os.stat_result can't form a reference
+// cycle), which makes creating one for every entry cheaper.
+#[pyclass(module = "crabwalk", frozen)]
 pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
     #[pyo3(get)]
     follow_symlinks: bool,
-    stat: Option<Py<PyAny>>,
+    stat: PyOnceLock<Py<PyAny>>,
 }
 
 impl DirEntry {
@@ -19,7 +20,7 @@ impl DirEntry {
         Self {
             inner: dir_entry,
             follow_symlinks,
-            stat: None,
+            stat: PyOnceLock::new(),
         }
     }
 }
@@ -29,13 +30,13 @@ impl DirEntry {
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         // Convert path to a PyString and use repr so the output
         // contains surrogate escapes.
-        let path = self.inner.path().as_os_str().into_pyobject(py)?;
+        let path = fsdecode(py, self.inner.path().as_os_str())?;
         Ok(format!("<DirEntry {}>", path.repr()?))
     }
 
     #[getter]
-    fn path(&self) -> &OsStr {
-        self.inner.path().as_os_str()
+    fn path<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
+        fsdecode(py, self.inner.path().as_os_str())
     }
 
     #[cfg(unix)]
@@ -44,7 +45,7 @@ impl DirEntry {
     }
 
     #[cfg(not(unix))]
-    fn inode(&mut self, py: Python<'_>) -> PyResult<u64> {
+    fn inode(&self, py: Python<'_>) -> PyResult<u64> {
         Ok(self.stat(py)?.getattr(py, "st_ino")?.extract(py)?)
     }
 
@@ -67,8 +68,8 @@ impl DirEntry {
     }
 
     #[getter]
-    fn name(&self) -> &OsStr {
-        self.inner.file_name()
+    fn name<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
+        fsdecode(py, self.inner.file_name())
     }
 
     #[getter]
@@ -76,33 +77,22 @@ impl DirEntry {
         self.inner.depth()
     }
 
-    fn __fspath__(&self) -> &OsStr {
-        self.inner.path().as_os_str()
+    fn __fspath__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
+        fsdecode(py, self.inner.path().as_os_str())
     }
 
-    fn stat(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        match &self.stat {
-            Some(stat) => Ok(stat.clone_ref(py)),
-            None => {
-                let kwargs = [("follow_symlinks", self.follow_symlinks)];
-                let stat = OS_STAT.get(py).unwrap().bind(py).call(
-                    (self.inner.path().as_os_str(),),
-                    Some(&kwargs.into_py_dict(py)?),
-                )?;
-                self.stat = Some(stat.clone().into());
-                Ok(stat.into())
-            }
-        }
-    }
-
-    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        if let Some(stat) = &self.stat {
-            visit.call(stat)?;
-        }
-        Ok(())
-    }
-
-    fn __clear__(&mut self) {
-        self.stat = None;
+    fn stat(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        self.stat
+            .get_or_try_init(py, || {
+                let kwargs = [("follow_symlinks", self.follow_symlinks)].into_py_dict(py)?;
+                let path = self.inner.path().as_os_str();
+                let stat = OS_STAT
+                    .get(py)
+                    .unwrap()
+                    .bind(py)
+                    .call((path,), Some(&kwargs))?;
+                Ok::<_, PyErr>(stat.unbind())
+            })
+            .map(|stat| stat.clone_ref(py))
     }
 }
