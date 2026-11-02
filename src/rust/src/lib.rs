@@ -447,7 +447,7 @@ impl Walk {
             State::Opened | State::Started(_) => {
                 return Err(PyRuntimeError::new_err(
                     "Walk context manager is not reentrant",
-                ))
+                ));
             }
             State::Closed => return Err(PyRuntimeError::new_err("Walk is closed")),
         };
