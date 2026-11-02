@@ -115,6 +115,14 @@ tests = [
 ]
 
 [tool.uv]
+# Rebuild the extension module when Rust code changes
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/rust/**/*.rs" },
+    { file = "src/rust/Cargo.toml" },
+]
 # Lock latest versions for each Python version
 environments = [
     "python_version>='3.13'",
