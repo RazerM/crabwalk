@@ -51,6 +51,7 @@ class Walk:
         skip_stdout: bool = ...,
         filter_entry: Callable[[DirEntry], bool] | None = ...,
         onerror: Callable[[Exception], None] | None = ...,
+        threads: int = ...,
     ) -> Walk: ...
     def disable_standard_filters(self) -> None: ...
     def enable_standard_filters(self) -> None: ...
@@ -79,6 +80,7 @@ class Walk:
     skip_stdout: bool
     filter_entry: Callable[[DirEntry], bool] | None
     onerror: Callable[[Exception], None] | None
+    threads: int
     def __enter__(self) -> Walk: ...
     def __exit__(
         self,

@@ -69,4 +69,16 @@ with Walk(".", hidden=False, custom_ignore_filenames=(".myignore",)) as walk:
         print(entry.path)
 ```
 
+### Parallel
+
+Read directories in parallel (yielding entries in an arbitrary order):
+
+```python
+from crabwalk import Walk
+
+with Walk(".", threads=0) as walk:
+    for entry in walk:
+        print(entry.path)
+```
+
 See the documentation for all options.

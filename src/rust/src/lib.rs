@@ -14,7 +14,7 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
 use pyo3::{BoundObject, PyTraverseError, PyVisit, ffi};
 
-use crate::callback::CallbackError;
+use crate::callback::{CallbackError, keep_thread_state};
 use crate::direntry::DirEntry;
 use crate::entries::Entries;
 use crate::error::IgnoreError;
@@ -85,6 +85,7 @@ pub struct Walk {
     skip_stdout: bool,
     filter_entry: Option<Py<PyAny>>,
     onerror: Option<Py<PyAny>>,
+    threads: usize,
     callback_error: CallbackError,
 }
 
@@ -114,7 +115,8 @@ impl Walk {
             same_file_system = false,
             skip_stdout = false,
             filter_entry = None,
-            onerror = None
+            onerror = None,
+            threads = 1
         )
     )]
     #[allow(clippy::too_many_arguments)]
@@ -142,6 +144,7 @@ impl Walk {
         skip_stdout: bool,
         filter_entry: Option<Py<PyAny>>,
         onerror: Option<Py<PyAny>>,
+        threads: usize,
     ) -> PyResult<Self> {
         let paths = PyList::new(py, paths)?;
         let global_ignore_files = match global_ignore_files {
@@ -180,6 +183,7 @@ impl Walk {
             skip_stdout,
             filter_entry,
             onerror,
+            threads,
             callback_error: CallbackError::default(),
         };
         instance.set_overrides(overrides)?;
@@ -484,6 +488,18 @@ impl Walk {
         Ok(self_)
     }
 
+    #[getter]
+    fn threads(&self) -> usize {
+        self.threads
+    }
+
+    #[setter]
+    fn set_threads(&mut self, value: usize) -> PyResult<()> {
+        self.check_not_started_setter()?;
+        self.threads = value;
+        Ok(())
+    }
+
     /// Close the iterator and free acquired resources
     ///
     /// It is recommended to use a ``with`` statement instead.
@@ -685,6 +701,8 @@ impl Walk {
                 if callback_error.is_set() {
                     return true;
                 }
+                // The parallel walker calls this from its own threads.
+                keep_thread_state();
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
                 Python::attach(|py| {
                     filter_entry
@@ -751,9 +769,25 @@ impl Walk {
             builder.types(types);
         }
 
-        let has_callbacks =
-            self.filter_entry.is_some() || matches!(self.sort, SortValue::Callable(_));
-        Ok(Entries::sequential(builder.build(), !has_callbacks))
+        match self.threads {
+            1 => {
+                let has_callbacks =
+                    self.filter_entry.is_some() || matches!(self.sort, SortValue::Callable(_));
+                Ok(Entries::sequential(builder.build(), !has_callbacks))
+            }
+            threads => {
+                // The parallel walker doesn't support sorting, which only
+                // makes sense for a deterministic order anyway.
+                if !matches!(self.sort, SortValue::Bool(false)) {
+                    return Err(PyValueError::new_err(
+                        "sort is not supported when using more than one thread",
+                    ));
+                }
+                // 0 chooses automatically.
+                builder.threads(threads);
+                Ok(Entries::parallel(builder.build_parallel())?)
+            }
+        }
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {

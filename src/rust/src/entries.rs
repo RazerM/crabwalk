@@ -6,22 +6,23 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
+use ignore::{ParallelVisitor, ParallelVisitorBuilder, WalkParallel, WalkState};
 use pyo3::Python;
 
-use crate::callback::CallbackError;
+use crate::callback::{CallbackError, release_thread_state};
 
 /// How many results to read from the walker each time the GIL is released.
 const BATCH_SIZE: usize = 128;
 
-/// How many results the producer thread sends at once. Larger batches mean
-/// fewer thread wakeups.
+/// How many results producer threads send at once. Larger batches mean fewer
+/// thread wakeups.
 const THREAD_BATCH_SIZE: usize = 1024;
 
 /// How many results to read inline before moving a sequential walk to a
 /// producer thread, so that small walks don't pay for starting a thread.
 const BACKGROUND_AFTER: usize = 1024;
 
-/// How many batches the producer thread can get ahead of the consumer.
+/// How many batches producer threads can get ahead of the consumer.
 const QUEUE_BATCHES: usize = 16;
 
 pub type WalkResult = Result<ignore::DirEntry, ignore::Error>;
@@ -65,6 +66,15 @@ impl Entries {
                 read: 0,
             },
         }
+    }
+
+    /// Walk using the `ignore` crate's parallel walker. Entries arrive in an
+    /// arbitrary order.
+    pub fn parallel(walk: WalkParallel) -> io::Result<Self> {
+        Ok(Self {
+            batch: Vec::new().into_iter(),
+            source: Source::spawn(move |sender| walk.visit(&mut SenderBuilder(sender)))?,
+        })
     }
 
     pub fn pop(&mut self) -> Option<WalkResult> {
@@ -196,4 +206,51 @@ fn fill_batch(
         batch.push(result);
     }
     false
+}
+
+/// Sends batches of results from each of the parallel walker's threads.
+struct Sender {
+    sender: SyncSender<Vec<WalkResult>>,
+    batch: Vec<WalkResult>,
+}
+
+impl Sender {
+    fn flush(&mut self) -> bool {
+        if self.batch.is_empty() {
+            return true;
+        }
+        let batch = mem::replace(&mut self.batch, Vec::with_capacity(THREAD_BATCH_SIZE));
+        self.sender.send(batch).is_ok()
+    }
+}
+
+impl ParallelVisitor for Sender {
+    fn visit(&mut self, result: WalkResult) -> WalkState {
+        self.batch.push(result);
+        if self.batch.len() < THREAD_BATCH_SIZE || self.flush() {
+            WalkState::Continue
+        } else {
+            // The consumer has gone away.
+            WalkState::Quit
+        }
+    }
+}
+
+impl Drop for Sender {
+    fn drop(&mut self) {
+        self.flush();
+        // Each of the walker's threads drops its visitor when it finishes.
+        release_thread_state();
+    }
+}
+
+struct SenderBuilder(SyncSender<Vec<WalkResult>>);
+
+impl<'s> ParallelVisitorBuilder<'s> for SenderBuilder {
+    fn build(&mut self) -> Box<dyn ParallelVisitor + 's> {
+        Box::new(Sender {
+            sender: self.0.clone(),
+            batch: Vec::with_capacity(THREAD_BATCH_SIZE),
+        })
+    }
 }
