@@ -1,8 +1,6 @@
 #![deny(rust_2018_idioms)]
 
-use std::cmp::Ordering;
 use std::ffi::OsString;
-use std::path::Path;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
@@ -15,10 +13,12 @@ use pyo3::{BoundObject, PyTraverseError, PyVisit};
 
 use crate::direntry::DirEntry;
 use crate::error::IgnoreError;
+use crate::sort::KeyComparator;
 use crate::util::{fspath, fspath_list};
 
 mod direntry;
 mod error;
+mod sort;
 mod types;
 mod util;
 
@@ -635,35 +635,9 @@ impl Walk {
         }
 
         match &self.sort {
-            SortValue::Callable(sort) => {
-                let sort = sort.clone_ref(py);
-                builder.sort_by_file_path(move |a, b| {
-                    fn inner(sort_key: &Py<PyAny>, a: &Path, b: &Path) -> PyResult<Ordering> {
-                        Python::attach(|py| {
-                            let a = sort_key.call1(py, (a.as_os_str(),))?;
-                            let b = sort_key.call1(py, (b.as_os_str(),))?;
-
-                            let ra = a.bind(py);
-                            let rb = b.bind(py);
-
-                            Ok(match ra.gt(rb)? as i8 - ra.lt(rb)? as i8 {
-                                -1 => Ordering::Less,
-                                0 => Ordering::Equal,
-                                1 => Ordering::Greater,
-                                _ => unreachable!(),
-                            })
-                        })
-                    }
-
-                    inner(&sort, a, b).unwrap_or_else(|err| {
-                        Python::attach(|py| {
-                            if !PyErr::occurred(py) {
-                                err.restore(py);
-                            }
-                        });
-                        a.cmp(b)
-                    })
-                });
+            SortValue::Callable(key) => {
+                let comparator = KeyComparator::new(key.clone_ref(py));
+                builder.sort_by_file_path(move |a, b| comparator.compare(a, b));
             }
             SortValue::Bool(true) => {
                 builder.sort_by_file_path(|a, b| a.cmp(b));

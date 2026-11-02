@@ -738,3 +738,80 @@ def test_no_paths() -> None:
         Walk() as walk,
     ):
         next(walk)
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        Directory(
+            "b",
+            File("c"),
+            File("d"),
+            File("e"),
+        ),
+        File("f"),
+    ),
+    chdir=True,
+)
+def test_sort_key_called_once_per_entry(tree_path: Path, walk_paths: WalkPaths) -> None:
+    key = Mock(wraps=str)
+    walk = Walk("root", sort=key)
+    assert list(walk_paths(walk)) == [
+        "root",
+        "root/a",
+        "root/b",
+        "root/b/c",
+        "root/b/d",
+        "root/b/e",
+        "root/f",
+    ]
+    assert sorted(call.args[0] for call in key.call_args_list) == [
+        "root/a",
+        "root/b",
+        "root/b/c",
+        "root/b/d",
+        "root/b/e",
+        "root/f",
+    ]
+
+
+class LessThanOnly:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __lt__(self, other: "LessThanOnly") -> bool:
+        return self.value > other.value
+
+    def __gt__(self, other: "LessThanOnly") -> bool:
+        pytest.fail("sort keys should only be compared with <")
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+        File("c"),
+    ),
+    chdir=True,
+)
+def test_sort_key_uses_less_than(tree_path: Path, walk_paths: WalkPaths) -> None:
+    walk = Walk("root", sort=LessThanOnly)
+    assert list(walk_paths(walk)) == ["root", "root/c", "root/b", "root/a"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+    ),
+    chdir=True,
+)
+def test_sort_key_error(tree_path: Path, walk_paths: WalkPaths) -> None:
+    def key(path: str) -> str:
+        raise ZeroDivisionError
+
+    with pytest.raises(ZeroDivisionError):
+        list(walk_paths(Walk("root", sort=key)))
