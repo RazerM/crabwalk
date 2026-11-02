@@ -1,5 +1,9 @@
+import gc
 import os
 import sys
+import time
+import warnings
+import weakref
 from pathlib import Path
 
 import pytest
@@ -121,3 +125,42 @@ def test_onerror_parallel(tmp_path: Path) -> None:
     [error] = errors
     assert isinstance(error, PermissionError)
     assert error.filename == str(locked)
+
+
+class Callback:
+    """Returns its argument, so it works as filter_entry and as a sort key."""
+
+    walk: Walk
+
+    def __call__(self, arg: object) -> object:
+        return arg
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"filter_entry": True}, id="filter_entry"),
+        pytest.param({"sort": True}, id="sort"),
+        pytest.param({"filter_entry": True, "threads": 2}, id="filter_entry-threads"),
+    ],
+)
+def test_callback_cycle_collected(big_tree: Path, kwargs: dict[str, object]) -> None:
+    # A callback that references its walk must be collectable while the walk
+    # is in progress, even though the walker holds it too.
+    callback = Callback()
+    callbacks = {name: callback for name in kwargs if name != "threads"}
+    walk = Walk(big_tree, threads=kwargs.get("threads", 1), **callbacks)  # type: ignore[arg-type]
+    callback.walk = walk
+    ref = weakref.ref(callback)
+    for _ in range(100):
+        next(walk)
+    del walk, callback, callbacks
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ResourceWarning)
+        # A worker thread may briefly hold the callback while calling it.
+        deadline = time.monotonic() + 5
+        while ref() is not None and time.monotonic() < deadline:
+            gc.collect()
+            time.sleep(0.01)
+    assert ref() is None

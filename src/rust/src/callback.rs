@@ -2,7 +2,10 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use pyo3::{PyErr, ffi};
+use pyo3::prelude::*;
+use pyo3::{PyTraverseError, PyVisit, ffi};
+
+use crate::util::{lock, try_lock};
 
 /// The first exception raised by a Python callback (a sort key or
 /// `filter_entry`) while the `ignore` crate is walking.
@@ -108,5 +111,39 @@ impl Drop for ThreadState {
             ffi::PyEval_RestoreThread(self.tstate);
             ffi::PyGILState_Release(self.gstate);
         }
+    }
+}
+
+/// A Python callback that the walker's closures share with the Walk, so that
+/// the Walk's `__traverse__` and `__clear__` account for the reference.
+/// Otherwise a callback that references its Walk would form a cycle the
+/// garbage collector can't see while walking.
+pub struct SharedCallback(Mutex<Option<Py<PyAny>>>);
+
+impl SharedCallback {
+    pub fn new(callback: Py<PyAny>) -> Arc<Self> {
+        Arc::new(Self(Mutex::new(Some(callback))))
+    }
+
+    /// The callback, or `None` if the garbage collector cleared the Walk.
+    pub fn get(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        lock(&self.0)
+            .as_ref()
+            .map(|callback| callback.clone_ref(py))
+    }
+
+    pub fn traverse(&self, visit: &PyVisit<'_>) -> Result<(), PyTraverseError> {
+        if let Some(callback) = try_lock(&self.0)
+            && let Some(callback) = &*callback
+        {
+            visit.call(callback)?;
+        }
+        Ok(())
+    }
+
+    pub fn clear(&self) {
+        let callback = lock(&self.0).take();
+        // Drop outside the lock, since it may run Python code.
+        drop(callback);
     }
 }

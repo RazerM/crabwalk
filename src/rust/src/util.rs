@@ -1,4 +1,5 @@
 use std::ffi::{OsStr, OsString};
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use pyo3::ffi;
 use pyo3::prelude::*;
@@ -44,4 +45,34 @@ pub fn fsdecode<'py>(py: Python<'py>, s: &OsStr) -> PyResult<Bound<'py, PyString
 #[cfg(not(unix))]
 pub fn fsdecode<'py>(py: Python<'py>, s: &OsStr) -> PyResult<Bound<'py, PyString>> {
     Ok(s.into_pyobject(py)?)
+}
+
+/// Lock a mutex that guards Python objects.
+///
+/// These mutexes are only held briefly while attached to the interpreter, and
+/// never while calling Python or detaching, so blocking while attached can't
+/// deadlock. Don't use `MutexExt::lock_py_attached` for them: it re-attaches
+/// while holding the lock, so the holder could be waiting for the GIL while a
+/// thread in `__clear__`, which can't detach, waits for the lock.
+///
+/// Poisoning is ignored, since every critical section leaves the data valid
+/// even if it panics, and a poisoned mutex stays poisoned.
+pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Lock a mutex that guards Python objects if it isn't held by another thread,
+/// for `__traverse__`, which must never block.
+///
+/// When this returns `None`, `__traverse__` skips the references behind the
+/// lock. That only makes the garbage collector treat the objects as reachable
+/// until a later collection, whereas visiting references that don't exist
+/// could free objects that are still in use. Poisoning is ignored like in
+/// `lock`, or the references would be skipped forever.
+pub fn try_lock<T>(mutex: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match mutex.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(TryLockError::Poisoned(err)) => Some(err.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
+    }
 }

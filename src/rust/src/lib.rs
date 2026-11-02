@@ -4,6 +4,7 @@ use std::any::Any;
 use std::ffi::OsString;
 use std::mem;
 use std::panic;
+use std::sync::Arc;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
@@ -14,7 +15,7 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
 use pyo3::{BoundObject, PyTraverseError, PyVisit, ffi};
 
-use crate::callback::{CallbackError, keep_thread_state};
+use crate::callback::{CallbackError, SharedCallback, keep_thread_state};
 use crate::direntry::DirEntry;
 use crate::entries::Entries;
 use crate::error::IgnoreError;
@@ -87,6 +88,9 @@ pub struct Walk {
     onerror: Option<Py<PyAny>>,
     threads: usize,
     callback_error: CallbackError,
+    // Python callbacks used by the walker, shared with it.
+    shared_filter_entry: Option<Arc<SharedCallback>>,
+    shared_sort: Option<Arc<KeyComparator>>,
 }
 
 #[pymethods]
@@ -185,6 +189,8 @@ impl Walk {
             onerror,
             threads,
             callback_error: CallbackError::default(),
+            shared_filter_entry: None,
+            shared_sort: None,
         };
         instance.set_overrides(overrides)?;
         instance.set_types(types)?;
@@ -614,6 +620,12 @@ impl Walk {
         if let Some(onerror) = &self.onerror {
             visit.call(onerror)?;
         }
+        if let Some(filter_entry) = &self.shared_filter_entry {
+            filter_entry.traverse(&visit)?;
+        }
+        if let Some(sort) = &self.shared_sort {
+            sort.traverse(&visit)?;
+        }
         Ok(())
     }
 
@@ -626,6 +638,12 @@ impl Walk {
         self.sort = SortValue::Bool(false);
         self.filter_entry = None;
         self.onerror = None;
+        if let Some(filter_entry) = self.shared_filter_entry.take() {
+            filter_entry.clear();
+        }
+        if let Some(sort) = self.shared_sort.take() {
+            sort.clear();
+        }
     }
 }
 
@@ -694,7 +712,11 @@ impl Walk {
             builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
-        if let Some(filter_entry) = self.filter_entry.as_ref().map(|f| f.clone_ref(py)) {
+        self.shared_filter_entry = self
+            .filter_entry
+            .as_ref()
+            .map(|filter_entry| SharedCallback::new(filter_entry.clone_ref(py)));
+        if let Some(filter_entry) = self.shared_filter_entry.clone() {
             let follow_symlinks = self.follow_symlinks;
             let callback_error = self.callback_error.clone();
             builder.filter_entry(move |dent| {
@@ -705,6 +727,10 @@ impl Walk {
                 keep_thread_state();
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
                 Python::attach(|py| {
+                    // The garbage collector may have cleared the Walk.
+                    let Some(filter_entry) = filter_entry.get(py) else {
+                        return true;
+                    };
                     filter_entry
                         .call1(py, (py_dent,))
                         .and_then(|result| result.is_truthy(py))
@@ -720,6 +746,7 @@ impl Walk {
         match &self.sort {
             SortValue::Callable(key) => {
                 let comparator = KeyComparator::new(key.clone_ref(py), self.callback_error.clone());
+                self.shared_sort = Some(comparator.clone());
                 builder.sort_by_file_path(move |a, b| comparator.compare(a, b));
             }
             SortValue::Bool(true) => {
