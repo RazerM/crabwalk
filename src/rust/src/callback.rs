@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
+use pyo3::exceptions::PyBaseException;
 use pyo3::prelude::*;
 use pyo3::{PyTraverseError, PyVisit, ffi};
 
@@ -13,6 +14,9 @@ use crate::util::{lock, try_lock};
 /// The callbacks can't return errors to the `ignore` crate, so they store them
 /// here and `Walk.__next__` raises them. Once set, callbacks shouldn't call
 /// Python again until the error has been taken.
+///
+/// The exception is shared with the Walk, which visits it in `__traverse__`:
+/// its traceback may reference the Walk.
 #[derive(Clone, Default)]
 pub struct CallbackError(Arc<Inner>);
 
@@ -20,7 +24,7 @@ pub struct CallbackError(Arc<Inner>);
 struct Inner {
     // Checked for every entry, so avoid locking the mutex for that.
     is_set: AtomicBool,
-    err: Mutex<Option<PyErr>>,
+    exception: Mutex<Option<Py<PyBaseException>>>,
 }
 
 impl CallbackError {
@@ -28,29 +32,50 @@ impl CallbackError {
         self.0.is_set.load(Ordering::Acquire)
     }
 
-    pub fn set(&self, err: PyErr) {
-        let mut slot = self.lock();
+    pub fn set(&self, py: Python<'_>, err: PyErr) {
+        let exception = err.into_value(py);
+        let mut slot = lock(&self.0.exception);
         if slot.is_none() {
-            *slot = Some(err);
+            *slot = Some(exception);
             self.0.is_set.store(true, Ordering::Release);
+            return;
         }
+        drop(slot);
+        // Drop outside the lock, since it may run Python code.
+        drop(exception);
     }
 
-    pub fn take(&self) -> Option<PyErr> {
+    pub fn take(&self, py: Python<'_>) -> Option<PyErr> {
         if !self.is_set() {
             return None;
         }
-        let mut slot = self.lock();
-        // Reset the flag while locked, so that it can't hide an exception
-        // set by another thread in between.
-        self.0.is_set.store(false, Ordering::Release);
-        slot.take()
+        let exception = {
+            let mut slot = lock(&self.0.exception);
+            // Reset the flag while locked, so that it can't hide an exception
+            // set by another thread in between.
+            self.0.is_set.store(false, Ordering::Release);
+            slot.take()
+        };
+        exception.map(|exception| PyErr::from_value(exception.into_bound(py).into_any()))
     }
 
-    fn lock(&self) -> MutexGuard<'_, Option<PyErr>> {
-        // Python is never called while this is locked, so poisoning would only
-        // happen if a PyErr panicked on drop.
-        self.0.err.lock().unwrap_or_else(PoisonError::into_inner)
+    pub fn traverse(&self, visit: &PyVisit<'_>) -> Result<(), PyTraverseError> {
+        if let Some(exception) = try_lock(&self.0.exception)
+            && let Some(exception) = &*exception
+        {
+            visit.call(exception)?;
+        }
+        Ok(())
+    }
+
+    pub fn clear(&self) {
+        let exception = {
+            let mut slot = lock(&self.0.exception);
+            self.0.is_set.store(false, Ordering::Release);
+            slot.take()
+        };
+        // Drop outside the lock, since it may run Python code.
+        drop(exception);
     }
 }
 

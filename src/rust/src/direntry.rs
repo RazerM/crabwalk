@@ -1,18 +1,23 @@
+use std::sync::Mutex;
+
 use pyo3::prelude::*;
-use pyo3::sync::PyOnceLock;
 use pyo3::types::{IntoPyDict, PyString};
+use pyo3::{PyTraverseError, PyVisit, ffi};
 
 use crate::OS_STAT;
-use crate::util::fsdecode;
+use crate::util::{fsdecode, lock, try_lock};
 
-// Frozen and without __traverse__ (os.stat_result can't form a reference
-// cycle), which makes creating one for every entry cheaper.
+// Frozen, which makes creating one for every entry cheaper. Walk.__next__
+// also untracks them from the garbage collector, since they can't be part of
+// a reference cycle until stat() caches a result.
 #[pyclass(module = "crabwalk", frozen)]
 pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
     #[pyo3(get)]
     follow_symlinks: bool,
-    stat: PyOnceLock<Py<PyAny>>,
+    // The cached stat result. A mutex rather than a once lock so that
+    // __clear__ can drop it.
+    stat: Mutex<Option<Py<PyAny>>>,
 }
 
 impl DirEntry {
@@ -20,7 +25,7 @@ impl DirEntry {
         Self {
             inner: dir_entry,
             follow_symlinks,
-            stat: PyOnceLock::new(),
+            stat: Mutex::new(None),
         }
     }
 }
@@ -45,8 +50,9 @@ impl DirEntry {
     }
 
     #[cfg(not(unix))]
-    fn inode(&self, py: Python<'_>) -> PyResult<u64> {
-        Ok(self.stat(py)?.getattr(py, "st_ino")?.extract(py)?)
+    fn inode(slf: &Bound<'_, Self>) -> PyResult<u64> {
+        let py = slf.py();
+        Ok(Self::stat(slf)?.getattr(py, "st_ino")?.extract(py)?)
     }
 
     fn is_dir(&self) -> bool {
@@ -81,18 +87,57 @@ impl DirEntry {
         fsdecode(py, self.inner.path().as_os_str())
     }
 
-    fn stat(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.stat
-            .get_or_try_init(py, || {
-                let kwargs = [("follow_symlinks", self.follow_symlinks)].into_py_dict(py)?;
-                let path = self.inner.path().as_os_str();
-                let stat = OS_STAT
-                    .get(py)
-                    .unwrap()
-                    .bind(py)
-                    .call((path,), Some(&kwargs))?;
-                Ok::<_, PyErr>(stat.unbind())
-            })
-            .map(|stat| stat.clone_ref(py))
+    fn stat(slf: &Bound<'_, Self>) -> PyResult<Py<PyAny>> {
+        let py = slf.py();
+        let this = slf.get();
+        if let Some(stat) = &*lock(&this.stat) {
+            return Ok(stat.clone_ref(py));
+        }
+        let kwargs = [("follow_symlinks", this.follow_symlinks)].into_py_dict(py)?;
+        let path = this.inner.path().as_os_str();
+        let stat = OS_STAT
+            .get(py)
+            .unwrap()
+            .bind(py)
+            .call((path,), Some(&kwargs))?
+            .unbind();
+
+        let mut cached = lock(&this.stat);
+        if let Some(existing) = &*cached {
+            // Another thread cached a result first.
+            let existing = existing.clone_ref(py);
+            drop(cached);
+            // Drop outside the lock, since it may run Python code.
+            drop(stat);
+            return Ok(existing);
+        }
+        *cached = Some(stat.clone_ref(py));
+        // os.stat may have been replaced to return anything, so the entry
+        // could now be part of a cycle. Only one thread can get here before
+        // the entry is tracked, so it can't be tracked twice, which is a fatal
+        // error.
+        // SAFETY: slf is a valid object of a type that supports GC, and its
+        // traverse function is valid.
+        unsafe {
+            if ffi::PyObject_GC_IsTracked(slf.as_ptr()) == 0 {
+                ffi::PyObject_GC_Track(slf.as_ptr().cast());
+            }
+        }
+        Ok(stat)
+    }
+
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        if let Some(stat) = try_lock(&self.stat)
+            && let Some(stat) = &*stat
+        {
+            visit.call(stat)?;
+        }
+        Ok(())
+    }
+
+    fn __clear__(&self) {
+        let stat = lock(&self.stat).take();
+        // Drop outside the lock, since it may run Python code.
+        drop(stat);
     }
 }

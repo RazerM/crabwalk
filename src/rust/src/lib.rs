@@ -543,7 +543,7 @@ impl Walk {
 
             let Some(result) = entries.pop() else {
                 // Don't pass user-caused errors through onerror, raise directly
-                if let Some(err) = self.callback_error.take() {
+                if let Some(err) = self.callback_error.take(py) {
                     return Err(err);
                 }
                 if entries.is_finished() {
@@ -565,7 +565,7 @@ impl Walk {
                     self.state = State::Closed;
                     return Err(self
                         .callback_error
-                        .take()
+                        .take(py)
                         .unwrap_or_else(|| walk_panic_error(payload)));
                 }
                 continue;
@@ -586,7 +586,8 @@ impl Walk {
                     }
                     let entry = Bound::new(py, DirEntry::new(dent, self.follow_symlinks))?;
                     // pyo3 makes every pyclass support garbage collection, but
-                    // DirEntry can't be part of a reference cycle. Untracking
+                    // a DirEntry can't be part of a reference cycle until it
+                    // caches a stat result, which tracks it again. Untracking
                     // it makes lists of entries cheaper for the collector.
                     // SAFETY: entry is a valid object.
                     unsafe { ffi::PyObject_GC_UnTrack(entry.as_ptr().cast()) };
@@ -629,6 +630,7 @@ impl Walk {
         if let Some(filter_entry) = &self.shared_filter_entry {
             filter_entry.traverse(&visit)?;
         }
+        self.callback_error.traverse(&visit)?;
         if let Some(sort) = &self.shared_sort {
             sort.traverse(&visit)?;
         }
@@ -650,6 +652,7 @@ impl Walk {
         if let Some(sort) = self.shared_sort.take() {
             sort.clear();
         }
+        self.callback_error.clear();
     }
 }
 
@@ -741,7 +744,7 @@ impl Walk {
                         .call1(py, (py_dent,))
                         .and_then(|result| result.is_truthy(py))
                         .unwrap_or_else(|err| {
-                            callback_error.set(err);
+                            callback_error.set(py, err);
                             // Keep the entry so the walker returns to __next__ soon.
                             true
                         })

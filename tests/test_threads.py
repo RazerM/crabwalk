@@ -194,3 +194,34 @@ def test_fork(big_tree: Path, threads: int) -> None:
     _, status = os.waitpid(pid, 0)
     walk.close()
     assert os.waitstatus_to_exitcode(status) == 0
+
+
+@pytest.mark.parametrize("threads", [1, 4])
+def test_callback_exception_cycle_collected(big_tree: Path, threads: int) -> None:
+    # An exception from a callback is kept until the entries before it have
+    # been yielded. It must be collectable if it references the walk.
+    class Holder:
+        walk: Walk
+
+    holder = Holder()
+
+    def filter_entry(entry: DirEntry, holder: Holder = holder) -> bool:
+        if entry.depth:
+            exc = ValueError()
+            exc.holder = holder  # type: ignore[attr-defined]
+            raise exc
+        return True
+
+    walk = Walk(big_tree, threads=threads, filter_entry=filter_entry)
+    holder.walk = walk
+    ref = weakref.ref(holder)
+    next(walk)
+    del walk, holder, filter_entry
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ResourceWarning)
+        deadline = time.monotonic() + 5
+        while ref() is not None and time.monotonic() < deadline:
+            gc.collect()
+            time.sleep(0.01)
+    assert ref() is None

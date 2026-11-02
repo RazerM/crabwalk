@@ -45,7 +45,7 @@ impl KeyComparator {
         }
         Python::attach(|py| {
             self.try_compare(py, a, b).unwrap_or_else(|err| {
-                self.error.set(err);
+                self.error.set(py, err);
                 a.cmp(b)
             })
         })
