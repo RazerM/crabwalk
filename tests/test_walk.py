@@ -1,6 +1,7 @@
 import gc
 import os
 import random
+import re
 import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -31,9 +32,14 @@ def walk_paths_fixture() -> WalkPaths:
     def walk_paths(walk: Walk) -> Iterator[str]:
         with walk:
             for entry in walk:
-                yield entry.path
+                yield as_posix(entry.path)
 
     return walk_paths
+
+
+def as_posix(path: str) -> str:
+    """Use / to compare paths, which the walker joins with os.sep."""
+    return path.replace(os.sep, "/")
 
 
 @pytest.mark.tree(
@@ -167,7 +173,7 @@ def test_depth(tree_path: Path, walk_entries: WalkEntries) -> None:
 @pytest.mark.tree(
     Directory(
         "root",
-        Symlink("linked", "../sibling"),
+        Symlink("linked", "../sibling", directory=True),
     ),
     Directory(
         "sibling",
@@ -495,13 +501,19 @@ def test_sort_function(
     walk = Walk("root", sort=mock_sort)
     assert walk.sort is mock_sort
     assert list(walk_paths(walk)) == ["root", "root/a", "root/b"]
-    assert {args[0] for _, args, _ in mock_sort.mock_calls} == {"root/a", "root/b"}
+    assert {as_posix(args[0]) for _, args, _ in mock_sort.mock_calls} == {
+        "root/a",
+        "root/b",
+    }
 
     walk = Walk("root")
     assert walk.sort is False
     walk.sort = mock_sort
     assert list(walk_paths(walk)) == ["root", "root/a", "root/b"]
-    assert {args[0] for _, args, _ in mock_sort.mock_calls} == {"root/a", "root/b"}
+    assert {as_posix(args[0]) for _, args, _ in mock_sort.mock_calls} == {
+        "root/a",
+        "root/b",
+    }
 
 
 @pytest.mark.parametrize("value", [0, 1, "", None, 42])
@@ -599,7 +611,7 @@ def test_filter_entry_exception(tree_path: Path) -> None:
 def test_direntry_fspath(tree_path: Path, walk_entries: WalkEntries) -> None:
     root, foo = walk_entries(Walk("root", sort=True))
     assert os.fspath(root) == root.path == "root"
-    assert os.fspath(foo) == foo.path == "root/foo"
+    assert os.fspath(foo) == foo.path == os.path.join("root", "foo")
 
 
 @pytest.mark.tree(
@@ -644,7 +656,7 @@ def test_stat_cached(
         File("file1"),
         Directory("dir1"),
         Symlink("link1", "file1"),
-        Symlink("link2", "dir1"),
+        Symlink("link2", "dir1", directory=True),
     ),
     chdir=True,
 )
@@ -657,12 +669,7 @@ def test_direntry_against_os_direntry(tree_path: Path, follow_symlinks: bool) ->
     with os.scandir("root") as it:
         os_entries = sorted(it, key=lambda entry: entry.path)
 
-    assert [entry.path for entry in os_entries] == [
-        "root/dir1",
-        "root/file1",
-        "root/link1",
-        "root/link2",
-    ]
+    assert [entry.name for entry in os_entries] == ["dir1", "file1", "link1", "link2"]
 
     with Walk("root", follow_symlinks=follow_symlinks) as walk:
         root = next(walk)
@@ -683,7 +690,9 @@ def test_direntry_against_os_direntry(tree_path: Path, follow_symlinks: bool) ->
         assert os_entry.is_dir(follow_symlinks=follow_symlinks) == cw_entry.is_dir()
         assert os_entry.is_file(follow_symlinks=follow_symlinks) == cw_entry.is_file()
         assert os_entry.is_symlink() == cw_entry.is_symlink()
-        assert os_entry.stat(follow_symlinks=follow_symlinks) == cw_entry.stat()
+        # Not os_entry.stat(), which leaves st_ino, st_dev and st_nlink as zero
+        # on Windows.
+        assert os.stat(os_entry, follow_symlinks=follow_symlinks) == cw_entry.stat()
         assert cw_entry.follow_symlinks == follow_symlinks
 
 
@@ -836,7 +845,7 @@ def test_sort_key_called_once_per_entry(tree_path: Path, walk_paths: WalkPaths) 
         "root/b/e",
         "root/f",
     ]
-    assert sorted(call.args[0] for call in key.call_args_list) == [
+    assert sorted(as_posix(call.args[0]) for call in key.call_args_list) == [
         "root/a",
         "root/b",
         "root/b/c",
@@ -913,10 +922,11 @@ def test_filter_entry_error(tree_path: Path, walk_paths: WalkPaths) -> None:
         raise ZeroDivisionError(entry.path)
 
     walk = Walk("root", sort=True, filter_entry=filter_entry)
-    with pytest.raises(ZeroDivisionError, match="root/a"):
+    path = os.path.join("root", "a")
+    with pytest.raises(ZeroDivisionError, match=re.escape(path)):
         list(walk_paths(walk))
     # Python isn't called again once a callback has raised.
-    assert calls == ["root/a"]
+    assert calls == [path]
 
 
 def test_sort_key_inconsistent_order(tmp_path: Path) -> None:

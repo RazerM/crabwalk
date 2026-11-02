@@ -161,10 +161,14 @@ def test_missing_path(tmp_path: Path) -> None:
     [error] = errors
     assert isinstance(error, FileNotFoundError)
     assert error.errno == errno.ENOENT
-    assert error.strerror == os.strerror(errno.ENOENT)
     assert error.filename == str(missing)
     assert error.depth == 0  # type: ignore[attr-defined]
-    assert str(error) == f"[Errno 2] No such file or directory: {str(missing)!r}"
+
+    # The same message as Python's, which differs on Windows.
+    with pytest.raises(FileNotFoundError) as expected:
+        os.stat(str(missing))
+    assert error.strerror == expected.value.strerror
+    assert str(error) == str(expected.value)
 
     copy = pickle.loads(pickle.dumps(error))
     assert type(copy) is FileNotFoundError

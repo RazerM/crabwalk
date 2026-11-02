@@ -29,10 +29,12 @@ class Directory:
 class Symlink:
     name: str
     target: str
+    # Windows needs to know whether the target is a directory.
+    directory: bool = False
 
     def create(self, path: StrPath) -> None:
         source = Path(path, self.name)
-        os.symlink(Path(path, self.target), source)
+        os.symlink(Path(path, self.target), source, target_is_directory=self.directory)
 
 
 @dataclass
