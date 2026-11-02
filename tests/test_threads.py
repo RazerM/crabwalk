@@ -1,5 +1,6 @@
 import gc
 import os
+import signal
 import sys
 import time
 import warnings
@@ -164,3 +165,32 @@ def test_callback_cycle_collected(big_tree: Path, kwargs: dict[str, object]) -> 
             gc.collect()
             time.sleep(0.01)
     assert ref() is None
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+@pytest.mark.parametrize("threads", [1, 2])
+def test_fork(big_tree: Path, threads: int) -> None:
+    # Producer threads don't exist in a forked child, so using them would
+    # hang or crash.
+    walk = Walk(big_tree, threads=threads)
+    walk.disable_standard_filters()
+    for _ in range(1500):
+        next(walk)
+    with warnings.catch_warnings():
+        # Python warns about forking with threads running.
+        warnings.simplefilter("ignore", DeprecationWarning)
+        pid = os.fork()
+    if pid == 0:
+        signal.alarm(10)
+        code = 1
+        try:
+            list(walk)
+        except RuntimeError as exc:
+            code = 0 if "forked" in str(exc) else 2
+        walk.close()
+        del walk
+        gc.collect()
+        os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    walk.close()
+    assert os.waitstatus_to_exitcode(status) == 0

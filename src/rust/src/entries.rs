@@ -2,6 +2,7 @@ use std::any::Any;
 use std::io;
 use std::mem;
 use std::panic::{self, AssertUnwindSafe};
+use std::process;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -49,6 +50,8 @@ enum Source {
         // &mut, so the mutex is never locked.
         receiver: Mutex<Receiver<Vec<WalkResult>>>,
         handle: JoinHandle<()>,
+        /// The process the threads were started in.
+        pid: u32,
     },
     Finished,
 }
@@ -157,13 +160,37 @@ impl Entries {
         Ok(())
     }
 
+    /// Whether this process was forked after producer threads started, so
+    /// they don't exist here. The channel and thread handle then refer to
+    /// threads in the parent process and must not be used, which would hang
+    /// or crash.
+    pub fn is_forked(&self) -> bool {
+        matches!(self.source, Source::Threads { pid, .. } if pid != process::id())
+    }
+
     /// Stop any producer threads and wait for them to finish.
-    pub fn close(self, py: Python<'_>) {
-        if let Source::Threads { receiver, handle } = self.source {
+    pub fn close(mut self, py: Python<'_>) {
+        if self.is_forked() {
+            // Leave it to Drop.
+            return;
+        }
+        if let Source::Threads {
+            receiver, handle, ..
+        } = mem::replace(&mut self.source, Source::Finished)
+        {
             // Producers stop once they can't send.
             drop(receiver);
             // Detach in case producers are waiting to call Python callbacks.
             let _ = py.detach(|| handle.join());
+        }
+    }
+}
+
+impl Drop for Entries {
+    fn drop(&mut self) {
+        if self.is_forked() {
+            // Leak the channel and thread handle, see is_forked.
+            mem::forget(mem::replace(&mut self.source, Source::Finished));
         }
     }
 }
@@ -181,6 +208,7 @@ impl Source {
         Ok(Source::Threads {
             receiver: Mutex::new(receiver),
             handle,
+            pid: process::id(),
         })
     }
 }

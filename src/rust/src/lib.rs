@@ -551,6 +551,12 @@ impl Walk {
                     self.state = State::Closed;
                     return Ok(None);
                 }
+                if entries.is_forked() {
+                    self.state = State::Closed;
+                    return Err(PyRuntimeError::new_err(
+                        "Walk can't be continued in a process forked while it was walking",
+                    ));
+                }
                 // Sorting with a Python key that doesn't define a total order
                 // can make Rust's sort panic.
                 let callback_error = &self.callback_error;
