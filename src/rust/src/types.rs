@@ -1,16 +1,12 @@
 use ignore::types::TypesBuilder;
 use pyo3::prelude::*;
 
-use crate::error::IgnoreError;
-
-/// Raise `InvalidDefinitionError` if `name` isn't a valid file type name.
+/// Return whether `name` is a valid file type name.
 ///
 /// This defers to the `ignore` crate so that the rules match exactly.
 #[pyfunction]
-pub fn validate_type_name(name: &str) -> PyResult<()> {
-    TypesBuilder::new()
-        .add(name, "")
-        .map_err(|err| IgnoreError::from(err).into())
+pub fn is_valid_type_name(name: &str) -> bool {
+    TypesBuilder::new().add(name, "").is_ok()
 }
 
 /// Return the default file type definitions as `(name, globs)` pairs.

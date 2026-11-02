@@ -102,12 +102,18 @@ class PartialError(WalkError):
         return "\n".join(str(error) for error in self.errors)
 
 
-class InvalidDefinitionError(WalkError):
-    def __init__(self) -> None:
+class InvalidDefinitionError(WalkError, ValueError):
+    def __init__(self, *, name: str | None = None) -> None:
         super().__init__()
+        self.name = name
 
     def __str__(self) -> str:
-        return "invalid definition (format is type:glob, e.g. html:*.html)"
+        if self.name is None:
+            return "invalid file type definition"
+        return (
+            f"invalid file type name {self.name!r}: names must only contain "
+            "letters and numbers, and can't be 'all'"
+        )
 
 
 class UnrecognizedFileTypeError(WalkError):
@@ -307,6 +313,8 @@ class Types(MutableMapping[str, tuple[str, ...]]):
     compared with other :class:`Types` instances. Comparisons with other
     mappings only compare the definitions.
 
+    Removing a file type doesn't remove its selections or negations.
+
     :param other: Initial definitions, in any form accepted by
         :meth:`~collections.abc.MutableMapping.update`.
     :type other: collections.abc.Mapping[str, collections.abc.Iterable[str]] |
@@ -334,7 +342,8 @@ class Types(MutableMapping[str, tuple[str, ...]]):
                 # Only reachable for untyped callers.
                 msg = f"globs must be str, not {type(glob).__name__}"  # type: ignore[unreachable]
                 raise TypeError(msg)
-        _lib.validate_type_name(name)
+        if not _lib.is_valid_type_name(name):
+            raise InvalidDefinitionError(name=name)
         self._types[name] = globs
 
     def __delitem__(self, name: str) -> None:

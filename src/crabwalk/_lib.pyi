@@ -7,7 +7,7 @@ from _typeshed import StrPath, SupportsRichComparison
 
 from ._types import Overrides, Types
 
-__all__ = ["DirEntry", "Walk", "default_types", "validate_type_name"]
+__all__ = ["DirEntry", "Walk", "default_types", "is_valid_type_name"]
 
 @final
 class DirEntry:
@@ -23,7 +23,7 @@ class DirEntry:
     follow_symlinks: bool
 
 def default_types() -> list[tuple[str, list[str]]]: ...
-def validate_type_name(name: str) -> None: ...
+def is_valid_type_name(name: str) -> bool: ...
 
 @final
 class Walk:

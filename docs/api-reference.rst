@@ -270,8 +270,14 @@ Exceptions
 
 .. exception:: InvalidDefinitionError
 
-    A user specified file type definition could not be parsed. File type names
-    must only contain letters and numbers, and can't be ``all``.
+    A file type name is invalid. File type names must only contain letters and
+    numbers, and can't be ``all``.
+
+    This is also a :exc:`ValueError`.
+
+    .. attribute:: name
+
+        The invalid file type name.
 
 .. exception:: UnrecognizedFileTypeError
 

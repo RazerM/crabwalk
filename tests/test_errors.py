@@ -112,9 +112,14 @@ def test_invalid_definition_error(tmp_path: Path) -> None:
     assert exc_info.value.depth is None
     assert exc_info.value.line is None
     assert exc_info.value.path is None
+    assert isinstance(exc_info.value, ValueError)
+    assert exc_info.value.name == "*bar"
     assert str(exc_info.value) == (
-        "invalid definition (format is type:glob, e.g. html:*.html)"
+        "invalid file type name '*bar': names must only contain letters and "
+        "numbers, and can't be 'all'"
     )
+    copy = pickle.loads(pickle.dumps(exc_info.value))
+    assert copy.name == "*bar"
 
 
 def test_partial_error(tmp_path: Path) -> None:

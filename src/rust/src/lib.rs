@@ -831,7 +831,7 @@ fn _lib(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Walk>()?;
     m.add_class::<DirEntry>()?;
     m.add_function(wrap_pyfunction!(types::default_types, m)?)?;
-    m.add_function(wrap_pyfunction!(types::validate_type_name, m)?)?;
+    m.add_function(wrap_pyfunction!(types::is_valid_type_name, m)?)?;
 
     let _ = OS_STAT.set(py, py.import("os")?.getattr("stat")?.into());
 
