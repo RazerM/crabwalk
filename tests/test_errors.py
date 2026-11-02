@@ -1,5 +1,6 @@
 import errno
 import os
+import pickle
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -126,21 +127,23 @@ def test_partial_error(tmp_path: Path) -> None:
             for entry in walk:
                 print(entry)
 
-    for exc in exc_info.value.errors:
-        assert isinstance(exc, GlobError)
+    first, second = exc_info.value.errors
+    assert isinstance(first, GlobError)
+    assert isinstance(second, GlobError)
+    for exc in [first, second]:
         assert exc.path == str(ignore)
         assert exc.depth is None
 
-    assert str(exc_info.value.errors[0]) == (
+    assert str(first) == (
         f"{ignore}: line 1: error parsing glob '{{': unclosed alternate group; "
         "missing '}' (maybe escape '{' with '[{]'?)"
     )
-    assert exc_info.value.errors[0].line == 1
-    assert str(exc_info.value.errors[1]) == (
+    assert first.line == 1
+    assert str(second) == (
         f"{ignore}: line 2: error parsing glob 'a{{': unclosed alternate group; "
         "missing '}' (maybe escape '{' with '[{]'?)"
     )
-    assert exc_info.value.errors[1].line == 2
+    assert second.line == 2
 
 
 def test_missing_path(tmp_path: Path) -> None:
@@ -184,3 +187,16 @@ def test_permission_error(tmp_path: Path) -> None:
     assert error.errno == errno.EACCES
     assert error.filename == str(locked)
     assert error.depth == 1  # type: ignore[attr-defined]
+
+
+def test_partial_error_attributes() -> None:
+    error = PartialError([GlobError("bad", glob="{")])
+    assert error.line is None
+    assert error.path is None
+    assert error.depth is None
+
+    copy = pickle.loads(pickle.dumps(error))
+    assert str(copy) == str(error)
+    [glob_error] = copy.errors
+    assert isinstance(glob_error, GlobError)
+    assert glob_error.glob == "{"

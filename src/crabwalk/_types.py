@@ -92,9 +92,10 @@ class GlobError(WalkError):
 
 
 class PartialError(WalkError):
-    errors: Sequence[WalkError]
+    errors: Sequence[Exception]
 
-    def __init__(self, errors: Sequence[WalkError]) -> None:
+    def __init__(self, errors: Sequence[Exception]) -> None:
+        super().__init__(errors)
         self.errors = errors
 
     def __str__(self) -> str:
