@@ -30,6 +30,8 @@ def typing(session: nox.Session) -> None:
         "--group=typing",
     )
     session.run("mypy", "src/crabwalk", "tests")
+    # Check the stub matches the extension module
+    session.run("python", "-m", "mypy.stubtest", "crabwalk._lib")
 
 
 @nox.session(python="3.13")

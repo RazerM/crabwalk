@@ -1,22 +1,13 @@
 import os
 from collections.abc import Callable, Sequence
 from types import TracebackType
-from typing import Any, Protocol, TypeAlias, TypeVar, final
+from typing import final
+
+from _typeshed import StrPath, SupportsRichComparison
 
 from ._types import Overrides, Types
 
-StrPath: TypeAlias = str | os.PathLike[str]
-
-T = TypeVar("T")
-T_contra = TypeVar("T_contra", contravariant=True)
-
-class SupportsDunderLT(Protocol[T_contra]):
-    def __lt__(self, other: T_contra, /) -> bool: ...
-
-class SupportsDunderGT(Protocol[T_contra]):
-    def __gt__(self, other: T_contra, /) -> bool: ...
-
-SupportsRichComparison: TypeAlias = SupportsDunderLT[Any] | SupportsDunderGT[Any]
+__all__ = ["DirEntry", "Walk", "default_types", "validate_type_name"]
 
 @final
 class DirEntry:
@@ -55,7 +46,7 @@ class Walk:
         git_exclude: bool = ...,
         require_git: bool = ...,
         ignore_case_insensitive: bool = ...,
-        sort: Callable[[str], SupportsRichComparison] | bool = ...,
+        sort: Callable[[str], SupportsRichComparison] | bool | None = ...,
         same_file_system: bool = ...,
         skip_stdout: bool = ...,
         filter_entry: Callable[[DirEntry], bool] | None = ...,
