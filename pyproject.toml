@@ -70,6 +70,22 @@ module-name = "crabwalk._lib"
 locked = true
 sdist-generator = "git"
 
+[tool.cibuildwheel]
+build-frontend = "build[uv]"
+# Rust doesn't support 32-bit musl and nobody needs 32-bit wheels for 3.11+
+skip = ["*-win32", "*-*linux_i686"]
+test-groups = ["test"]
+test-sources = ["tests", "pyproject.toml"]
+test-command = "pytest"
+
+[tool.cibuildwheel.linux]
+before-all = "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
+environment = { PATH = "$HOME/.cargo/bin:$PATH" }
+
+[tool.cibuildwheel.macos.environment]
+# Rust's minimum macOS target
+MACOSX_DEPLOYMENT_TARGET = "10.12"
+
 [tool.ruff.lint]
 select = [
     "E4", "E7", "E9", "F", # ruff defaults
