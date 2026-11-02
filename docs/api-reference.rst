@@ -242,7 +242,7 @@ API Reference
             >>> types = Types()
             >>> types.add_defaults()
             >>> types["py"]
-            ('*.py',)
+            ('*.py', '*.pyi')
 
     .. method:: select(name: str) -> None
 

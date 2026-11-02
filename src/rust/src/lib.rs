@@ -575,11 +575,7 @@ impl Walk {
             }
         }
 
-        let mut builder = ignore::WalkBuilder::new(&paths[0]);
-
-        for path in paths.iter().skip(1) {
-            builder.add(path);
-        }
+        let mut builder = ignore::WalkBuilder::from_iter(&paths);
 
         builder
             .max_depth(self.max_depth)

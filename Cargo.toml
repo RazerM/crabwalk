@@ -9,7 +9,7 @@ version = "0.1.0"
 authors = ["Frazer McLean <frazer@frazermclean.co.uk>"]
 edition = "2021"
 publish = false
-rust-version = "1.65"
+rust-version = "1.88"
 
 [workspace.dependencies]
 pyo3 = { version = "0.23", features = ["abi3"] }
