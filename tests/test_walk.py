@@ -717,3 +717,24 @@ def test_next_after_close(tree_path: Path) -> None:
     with Walk("root") as walk:
         assert len(list(walk)) == 2
         assert list(walk) == []
+
+
+@pytest.mark.tree(
+    Directory(
+        "-",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_dash_path(tree_path: Path, walk_paths: WalkPaths) -> None:
+    with pytest.raises(ValueError, match=r"use '\./-'"):
+        list(walk_paths(Walk("-")))
+    assert list(walk_paths(Walk("./-", sort=True))) == ["./-", "./-/foo"]
+
+
+def test_no_paths() -> None:
+    with (
+        pytest.raises(TypeError, match="Must specify at least one path"),
+        Walk() as walk,
+    ):
+        next(walk)

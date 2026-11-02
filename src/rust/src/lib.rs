@@ -6,7 +6,7 @@ use std::path::Path;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
-use pyo3::exceptions::{PyResourceWarning, PyRuntimeError, PyTypeError};
+use pyo3::exceptions::{PyResourceWarning, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::PyOnceLock;
@@ -573,16 +573,11 @@ impl Walk {
         }
         let paths = fspath_list(paths)?;
 
-        // The ignore crate treats "-" specially and just returns "<stdin>" if you try to walk it.
-        let stdin = Path::new("-");
-
-        for path in &paths {
-            // This is ugly, can we fix this upstream?
-            if path == stdin {
-                return Err(PyTypeError::new_err(
-                    "path cannot be '-', use './-' if you need this.",
-                ));
-            }
+        // The ignore crate walks "-" as stdin, which only makes sense for a CLI.
+        if paths.iter().any(|path| path == "-") {
+            return Err(PyValueError::new_err(
+                "path cannot be '-', use './-' if you need this",
+            ));
         }
 
         let mut builder = ignore::WalkBuilder::from_iter(&paths);
