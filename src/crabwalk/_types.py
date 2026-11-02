@@ -280,10 +280,37 @@ _TypesInit: TypeAlias = (
 
 
 class Types(MutableMapping[str, tuple[str, ...]]):
-    """A mapping of file type names to globs, with selections and negations.
+    """A collection of file type definitions with selections and negations.
 
-    Values can be set from any iterable of globs, but are always returned as a
-    tuple.
+    ``Types`` is a :class:`~collections.abc.MutableMapping` of file type names
+    to globs. Values can be set to any iterable of globs, but are always
+    returned as a tuple.
+
+    Typical usage:
+
+    .. code-block:: python
+
+        types = Types()
+        types.add_defaults()
+        types.select("...")
+        types.negate("...")
+
+        with Walk(..., types=types) as walk:
+            ...
+
+    .. note::
+
+        A :class:`Types` instance without any selections or negations won't
+        affect the output of :class:`Walk`.
+
+    Like :class:`~collections.OrderedDict` and its order, selections are only
+    compared with other :class:`Types` instances. Comparisons with other
+    mappings only compare the definitions.
+
+    :param other: Initial definitions, in any form accepted by
+        :meth:`~collections.abc.MutableMapping.update`.
+    :type other: collections.abc.Mapping[str, collections.abc.Iterable[str]] |
+        collections.abc.Iterable[tuple[str, collections.abc.Iterable[str]]]
     """
 
     _types: dict[str, tuple[str, ...]]
@@ -356,11 +383,31 @@ class Types(MutableMapping[str, tuple[str, ...]]):
         self._types.clear()
 
     def add(self, name: str, glob: str) -> None:
-        """Add ``glob`` to the file type ``name``, creating it if necessary."""
+        """Add ``glob`` to the file type ``name``, creating it if necessary.
+
+        .. doctest::
+
+            >>> types = Types()
+            >>> types.add("py", "*.py")
+            >>> types.add("py", "*.pyi")
+            >>> types["py"]
+            ('*.py', '*.pyi')
+        """
         self[name] = (*self._types.get(name, ()), glob)
 
     def add_defaults(self) -> None:
-        """Add the default file types from the ``ignore`` crate."""
+        """Add the default file types from the ``ignore`` crate.
+
+        These are the same as ripgrep's, see ``rg --type-list``. Globs are
+        added to existing file types with the same name.
+
+        .. doctest::
+
+            >>> types = Types()
+            >>> types.add_defaults()
+            >>> types["py"]
+            ('*.py', '*.pyi')
+        """
         for name, globs in _lib.default_types():
             self[name] = (*self._types.get(name, ()), *globs)
 
