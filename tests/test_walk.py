@@ -214,6 +214,30 @@ def test_types(tree_path: Path, walk_paths: WalkPaths) -> None:
 @pytest.mark.tree(
     Directory(
         "root",
+        File("foo.py"),
+        File("foo.rs"),
+        File("foo.txt"),
+    ),
+    chdir=True,
+)
+def test_types_negate(tree_path: Path, walk_paths: WalkPaths) -> None:
+    types = Types({"rust": ["*.rs"]})
+    types.negate("rust")
+    walk = Walk("root", types=types, sort=True)
+    assert list(walk_paths(walk)) == ["root", "root/foo.py", "root/foo.txt"]
+
+
+def test_types_setter_type() -> None:
+    with pytest.raises(TypeError, match="must be a Types instance"):
+        Walk("root", types={"py": ["*.py"]})  # type: ignore[arg-type]
+    walk = Walk("root")
+    with pytest.raises(TypeError, match="must be a Types instance"):
+        walk.types = {"py": ["*.py"]}  # type: ignore[assignment]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
         File(".foo"),
         File("bar"),
     ),

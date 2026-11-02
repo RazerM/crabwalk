@@ -21,14 +21,6 @@ pub fn fspath_list(paths: &Bound<'_, PyList>) -> PyResult<Vec<OsString>> {
         .collect()
 }
 
-/// Similar to Option but the pyo3 conversion traits are not implemented for it, so we can use
-/// it as a default argument and know that it wasn't passed.
-#[derive(Clone, Debug)]
-pub enum Maybe<T> {
-    Some(T),
-    Missing,
-}
-
 pub(crate) trait InfallibleResult<T> {
     fn into_ok(self) -> T;
 }

@@ -7,11 +7,11 @@ from collections.abc import (
     MutableMapping,
     ValuesView,
 )
-from copy import deepcopy
+from copy import copy, deepcopy
 
 import pytest
 
-from crabwalk import Types
+from crabwalk import InvalidDefinitionError, Negate, Select, Types
 
 
 def test_mapping() -> None:
@@ -226,3 +226,115 @@ def test_setdefault() -> None:
 
     assert types.setdefault("rust", ("*.rs",)) == ("*.rs",)
     assert types["rust"] == ("*.rs",)
+
+
+def test_setitem_replaces() -> None:
+    types = Types()
+    types["py"] = ["*.py"]
+    types["py"] = ["*.pyi"]
+    assert types["py"] == ("*.pyi",)
+
+
+def test_setitem_iterable() -> None:
+    types = Types()
+    types["py"] = (glob for glob in ["*.py", "*.pyi"])
+    assert types["py"] == ("*.py", "*.pyi")
+
+
+def test_setitem_str() -> None:
+    types = Types()
+    with pytest.raises(TypeError, match="not a str"):
+        types["py"] = "*.py"
+    assert "py" not in types
+
+
+def test_setitem_non_str_glob() -> None:
+    types = Types()
+    with pytest.raises(TypeError, match="globs must be str, not int"):
+        types["py"] = [1]  # type: ignore[list-item]
+    assert "py" not in types
+
+
+@pytest.mark.parametrize("name", ["all", "py-3", "*", "a b"])
+def test_setitem_invalid_name(name: str) -> None:
+    types = Types()
+    with pytest.raises(InvalidDefinitionError):
+        types[name] = ["*.py"]
+    assert name not in types
+
+
+def test_equal_to_mapping() -> None:
+    types = Types({"py": ["*.py"]})
+    assert types == {"py": ("*.py",)}
+    assert types != {"py": ["*.py"]}
+    # Like OrderedDict, extra state is only compared between instances.
+    types.select("py")
+    assert types == {"py": ("*.py",)}
+
+
+def test_not_equal_to_other_types() -> None:
+    assert Types() != []
+    assert Types() != object()
+
+
+def test_shallow_copy() -> None:
+    types = Types({"py": ["*.py"]})
+    types.select("py")
+    for t2 in [copy(types), types.copy()]:
+        assert t2 == types
+        t2["rust"] = ["*.rs"]
+        t2.negate("py")
+        assert "rust" not in types
+        assert list(types.selections()) == [Select("py")]
+
+
+def test_repr() -> None:
+    types = Types({"py": ["*.py"]})
+    types.negate("py")
+    assert repr(types) == ("<Types {'py': ('*.py',)} selections=[Negate(name='py')]>")
+
+
+def test_select_negate() -> None:
+    types = Types({"py": ["*.py"], "rust": ["*.rs"]})
+    types.select("py")
+    types.negate("rust")
+    assert list(types.selections()) == [Select("py"), Negate("rust")]
+
+
+def test_select_all() -> None:
+    types = Types({"py": ["*.py"], "rust": ["*.rs"]})
+    types.select("all")
+    types["js"] = ["*.js"]
+    types.negate("all")
+    assert list(types.selections()) == [
+        Select("py"),
+        Select("rust"),
+        Negate("py"),
+        Negate("rust"),
+        Negate("js"),
+    ]
+
+
+def test_selections_snapshot() -> None:
+    types = Types({"py": ["*.py"]})
+    selections = types.selections()
+    types.select("py")
+    assert list(selections) == []
+
+
+def test_selection_classes() -> None:
+    assert Select("py") == Select("py")
+    assert Select("py") != Negate("py")  # type: ignore[comparison-overlap]
+    assert hash(Select("py")) == hash(Select("py"))
+    assert repr(Select("py")) == "Select(name='py')"
+    match Negate("py"):
+        case Negate(name):
+            assert name == "py"
+        case _:
+            pytest.fail("Negate didn't match")
+
+
+def test_add_defaults_extends() -> None:
+    types = Types({"rust": ["*.rust"]})
+    types.add_defaults()
+    assert types["rust"] == ("*.rust", "*.rs")

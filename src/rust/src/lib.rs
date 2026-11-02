@@ -12,11 +12,10 @@ use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::GILOnceCell;
 use pyo3::types::{PyBool, PyList, PySequence, PyTraceback, PyTuple, PyType};
-use pyo3::{ffi, BoundObject, PyTraverseError, PyTypeInfo, PyVisit};
+use pyo3::{ffi, BoundObject, PyTraverseError, PyVisit};
 
 use crate::direntry::DirEntry;
 use crate::error::IgnoreError;
-use crate::types::{Negate, Select, Selection, Types};
 use crate::util::{fspath, fspath_list};
 
 mod direntry;
@@ -25,10 +24,23 @@ mod types;
 mod util;
 
 static TYPES_MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
-static KEYS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
-static ITEMS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
-static VALUES_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
 static OS_STAT: GILOnceCell<PyObject> = GILOnceCell::new();
+
+/// The `crabwalk._types` module, imported on first use to avoid a circular
+/// import (it imports this module).
+fn types_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+    TYPES_MODULE
+        .get_or_try_init(py, || Ok(py.import("crabwalk._types")?.unbind()))
+        .map(|module| module.bind(py))
+}
+
+fn check_instance(value: &Bound<'_, PyAny>, type_name: &str, msg: &'static str) -> PyResult<()> {
+    let expected = types_module(value.py())?.getattr(type_name)?;
+    if !value.is_instance(&expected)? {
+        return Err(PyTypeError::new_err(msg));
+    }
+    Ok(())
+}
 
 enum State {
     Unopened,
@@ -47,7 +59,7 @@ pub struct Walk {
     global_ignore_files: Option<Py<PyList>>, // Only None after tp_clear
     custom_ignore_filenames: Option<Py<PyList>>, // Only None after tp_clear
     overrides: Option<PyObject>,
-    types: Option<Py<Types>>,
+    types: Option<PyObject>,
     hidden: bool,
     parents: bool,
     ignore: bool,
@@ -101,7 +113,7 @@ impl Walk {
         global_ignore_files: Option<&Bound<'py, PySequence>>,
         custom_ignore_filenames: Option<&Bound<'py, PySequence>>,
         overrides: Option<Bound<'py, PyAny>>,
-        types: Option<Py<Types>>,
+        types: Option<Bound<'py, PyAny>>,
         hidden: bool,
         parents: bool,
         ignore: bool,
@@ -138,7 +150,7 @@ impl Walk {
             global_ignore_files,
             custom_ignore_filenames,
             overrides: None,
-            types,
+            types: None,
             hidden,
             parents,
             ignore,
@@ -153,9 +165,8 @@ impl Walk {
             filter_entry,
             onerror,
         };
-        if let Some(overrides) = overrides {
-            instance.set_overrides(py, Some(overrides))?;
-        }
+        instance.set_overrides(overrides)?;
+        instance.set_types(types)?;
         Ok(instance)
     }
 
@@ -247,24 +258,16 @@ impl Walk {
     }
 
     #[setter]
-    fn set_overrides(
-        &mut self,
-        py: Python<'_>,
-        overrides: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<()> {
+    fn set_overrides(&mut self, overrides: Option<Bound<'_, PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.overrides = overrides
-            .map(|overrides| {
-                let types_mod = TYPES_MODULE.get(py).unwrap().bind(py);
-                let overrides_type = types_mod.getattr("Overrides").unwrap();
-                if !overrides.is_instance(&overrides_type)? {
-                    return Err(PyTypeError::new_err(
-                        "overrides must be an Overrides instance",
-                    ));
-                }
-                Ok(overrides.unbind())
-            })
-            .transpose()?;
+        if let Some(overrides) = &overrides {
+            check_instance(
+                overrides,
+                "Overrides",
+                "overrides must be an Overrides instance",
+            )?;
+        }
+        self.overrides = overrides.map(Bound::unbind);
         Ok(())
     }
 
@@ -274,9 +277,12 @@ impl Walk {
     }
 
     #[setter]
-    fn set_types(&mut self, types: Option<Py<Types>>) -> PyResult<()> {
+    fn set_types(&mut self, types: Option<Bound<'_, PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.types = types;
+        if let Some(types) = &types {
+            check_instance(types, "Types", "types must be a Types instance")?;
+        }
+        self.types = types.map(Bound::unbind);
         Ok(())
     }
 
@@ -685,25 +691,22 @@ impl Walk {
         }
 
         if let Some(types) = &self.types {
-            let types = types.borrow(py);
+            let types = types.bind(py);
             let mut types_builder = TypesBuilder::new();
-            for name in types.__iter__(py)?.bind(py) {
-                let name = name?;
-                let globs: Py<PyTuple> = types.__getitem__(py, &name)?.extract()?;
-                for glob in globs.extract::<Vec<PyBackedStr>>(py)? {
-                    types_builder
-                        .add(&name.extract::<PyBackedStr>()?, &glob)
-                        .map_err(IgnoreError::from)?;
+            for item in types.call_method0("items")?.try_iter()? {
+                let (name, globs): (PyBackedStr, Vec<PyBackedStr>) = item?.extract()?;
+                for glob in &globs {
+                    types_builder.add(&name, glob).map_err(IgnoreError::from)?;
                 }
             }
-            for selection in &types.selections {
-                match selection {
-                    Selection::Select(select) => {
-                        types_builder.select(&select.borrow(py).name(py)?);
-                    }
-                    Selection::Negate(negate) => {
-                        types_builder.negate(&negate.borrow(py).name(py)?);
-                    }
+            let select_type = types_module(py)?.getattr("Select")?;
+            for selection in types.call_method0("selections")?.try_iter()? {
+                let selection = selection?;
+                let name: PyBackedStr = selection.getattr("name")?.extract()?;
+                if selection.is_instance(&select_type)? {
+                    types_builder.select(&name);
+                } else {
+                    types_builder.negate(&name);
                 }
             }
             let types = types_builder.build().map_err(IgnoreError::from)?;
@@ -813,51 +816,10 @@ fn convert_and_call_onerror(onerror: &Bound<'_, PyAny>, err: ignore::Error) -> P
 
 #[pymodule]
 fn _lib(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let mutable_mapping_type = py
-        .import("collections.abc")?
-        .getattr("MutableMapping")?
-        .downcast_into::<PyType>()?;
-
     m.add_class::<Walk>()?;
-    mutable_mapping_type.call_method1("register", (Types::type_object(py),))?;
-    m.add_class::<Types>()?;
-    m.add_class::<Select>()?;
-    m.add_class::<Negate>()?;
     m.add_class::<DirEntry>()?;
-
-    let name = "_types".into_pyobject(py)?;
-    let globals = m.dict().as_ptr();
-
-    let types_mod: Py<PyModule> = unsafe {
-        let mod_ptr = ffi::PyImport_ImportModuleLevelObject(
-            name.as_ptr(),
-            globals,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            1,
-        );
-        Py::from_owned_ptr_or_err(py, mod_ptr)?
-    };
-
-    let _ = TYPES_MODULE.set(py, types_mod);
-
-    let collections_abc_mod = py.import("collections.abc")?;
-
-    let keys_view_type = collections_abc_mod
-        .getattr("KeysView")?
-        .downcast_into::<PyType>()?;
-
-    let items_view_type = collections_abc_mod
-        .getattr("ItemsView")?
-        .downcast_into::<PyType>()?;
-
-    let values_view_type = collections_abc_mod
-        .getattr("ValuesView")?
-        .downcast_into::<PyType>()?;
-
-    let _ = KEYS_VIEW_TYPE.set(py, keys_view_type.unbind());
-    let _ = ITEMS_VIEW_TYPE.set(py, items_view_type.unbind());
-    let _ = VALUES_VIEW_TYPE.set(py, values_view_type.unbind());
+    m.add_function(wrap_pyfunction!(types::default_types, m)?)?;
+    m.add_function(wrap_pyfunction!(types::validate_type_name, m)?)?;
 
     let _ = OS_STAT.set(py, py.import("os")?.getattr("stat")?.into());
 

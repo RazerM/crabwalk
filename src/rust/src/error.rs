@@ -1,8 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 
+use crate::types_module;
 use crate::util::InfallibleResult;
-use crate::TYPES_MODULE;
 
 pub struct IgnoreError(ignore::Error);
 
@@ -21,7 +21,10 @@ impl From<Box<ignore::Error>> for IgnoreError {
 impl From<IgnoreError> for PyErr {
     fn from(error: IgnoreError) -> Self {
         Python::with_gil(|py| {
-            let types_mod = TYPES_MODULE.get(py).unwrap().bind(py);
+            let types_mod = match types_module(py) {
+                Ok(types_mod) => types_mod,
+                Err(err) => return err,
+            };
             match error.0 {
                 ignore::Error::Io(err) => err.into(),
                 ignore::Error::Glob { err, glob } => {

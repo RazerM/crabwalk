@@ -1,14 +1,12 @@
 import os
-from collections.abc import Callable, Iterable, Iterator, MutableMapping, Sequence
+from collections.abc import Callable, Sequence
 from types import TracebackType
-from typing import Any, Protocol, TypeAlias, TypeVar, final, overload
+from typing import Any, Protocol, TypeAlias, TypeVar, final
 
-from ._types import Overrides
+from ._types import Overrides, Types
 
 StrPath: TypeAlias = str | os.PathLike[str]
 
-KT = TypeVar("KT")
-VT_co = TypeVar("VT_co", covariant=True)
 T = TypeVar("T")
 T_contra = TypeVar("T_contra", contravariant=True)
 
@@ -19,10 +17,6 @@ class SupportsDunderGT(Protocol[T_contra]):
     def __gt__(self, other: T_contra, /) -> bool: ...
 
 SupportsRichComparison: TypeAlias = SupportsDunderLT[Any] | SupportsDunderGT[Any]
-
-class SupportsKeysAndGetItem(Protocol[KT, VT_co]):
-    def keys(self) -> Iterable[KT]: ...
-    def __getitem__(self, key: KT, /) -> VT_co: ...
 
 @final
 class DirEntry:
@@ -37,50 +31,8 @@ class DirEntry:
     depth: int
     follow_symlinks: bool
 
-VIn: TypeAlias = Sequence[str]
-VOut: TypeAlias = tuple[str, ...]
-
-@final
-class Select:
-    __match_args__ = ("name",)
-    name: str
-
-    def __init__(self, name: str) -> None: ...
-
-@final
-class Negate:
-    __match_args__ = ("name",)
-    name: str
-
-    def __init__(self, name: str) -> None: ...
-
-@final
-class Types(MutableMapping[str, VOut]):
-    @overload
-    def __init__(
-        self, m: SupportsKeysAndGetItem[str, VIn], /, **kwargs: VIn
-    ) -> None: ...
-    @overload
-    def __init__(self, m: Iterable[tuple[str, VIn]], /, **kwargs: VIn) -> None: ...
-    @overload
-    def __init__(self, **kwargs: VIn) -> None: ...
-    def __getitem__(self, k: str, /) -> VOut: ...
-    def __setitem__(self, k: str, v: VIn, /) -> None: ...
-    def __delitem__(self, k: str, /) -> None: ...
-    def __iter__(self) -> Iterator[str]: ...
-    def __len__(self) -> int: ...
-    def setdefault(self, key: str, default: VIn = ..., /) -> VOut: ...
-    @overload
-    def update(self, m: SupportsKeysAndGetItem[str, VIn], /, **kwargs: VIn) -> None: ...
-    @overload
-    def update(self, m: Iterable[tuple[str, VIn]], /, **kwargs: VIn) -> None: ...
-    @overload
-    def update(self, **kwargs: VIn) -> None: ...
-    def add(self, name: str, glob: str) -> None: ...
-    def add_defaults(self) -> None: ...
-    def select(self, name: str) -> None: ...
-    def negate(self, name: str) -> None: ...
-    def selections(self) -> Iterator[Select | Negate]: ...
+def default_types() -> list[tuple[str, list[str]]]: ...
+def validate_type_name(name: str) -> None: ...
 
 @final
 class Walk:

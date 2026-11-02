@@ -1,7 +1,21 @@
+from __future__ import annotations
+
 import os
 import sys
-from collections.abc import Iterable, Iterator, MutableSequence, Sequence
-from typing import NamedTuple, TypeAlias, overload
+from collections.abc import (
+    Iterable,
+    Iterator,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NamedTuple, Self, TypeAlias, overload
+
+from . import _lib
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsKeysAndGetItem
 
 
 def _display(s: str) -> str:
@@ -183,9 +197,9 @@ class Overrides(MutableSequence[OverrideT]):
     def __getitem__(self, index: int) -> Override: ...
 
     @overload
-    def __getitem__(self, index: slice) -> "Overrides": ...
+    def __getitem__(self, index: slice) -> Overrides: ...
 
-    def __getitem__(self, index: int | slice) -> "Override | Overrides":
+    def __getitem__(self, index: int | slice) -> Override | Overrides:
         if isinstance(index, slice):
             return Overrides(self._overrides[index], path=self._path)
         else:
@@ -232,3 +246,132 @@ class Overrides(MutableSequence[OverrideT]):
     def __repr__(self) -> str:
         cls = type(self)
         return f"{cls.__name__}({self._overrides!r}, path={self._path!r})"
+
+
+@dataclass(frozen=True, slots=True)
+class Select:
+    """A selection of a file type by :meth:`Types.select`."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class Negate:
+    """A negation of a file type by :meth:`Types.negate`."""
+
+    name: str
+
+
+Selection: TypeAlias = Select | Negate
+_TypesInit: TypeAlias = (
+    "SupportsKeysAndGetItem[str, Iterable[str]] | Iterable[tuple[str, Iterable[str]]]"
+)
+
+
+class Types(MutableMapping[str, tuple[str, ...]]):
+    """A mapping of file type names to globs, with selections and negations.
+
+    Values can be set from any iterable of globs, but are always returned as a
+    tuple.
+    """
+
+    _types: dict[str, tuple[str, ...]]
+    _selections: list[Selection]
+
+    def __init__(self, other: _TypesInit = (), /, **kwargs: Iterable[str]) -> None:
+        self._types = {}
+        self._selections = []
+        self.update(other, **kwargs)
+
+    def __getitem__(self, name: str) -> tuple[str, ...]:
+        return self._types[name]
+
+    def __setitem__(self, name: str, globs: Iterable[str]) -> None:
+        if isinstance(globs, str):
+            msg = "globs must be an iterable of str, not a str"
+            raise TypeError(msg)
+        globs = tuple(globs)
+        for glob in globs:
+            if not isinstance(glob, str):
+                # Only reachable for untyped callers.
+                msg = f"globs must be str, not {type(glob).__name__}"  # type: ignore[unreachable]
+                raise TypeError(msg)
+        _lib.validate_type_name(name)
+        self._types[name] = globs
+
+    def __delitem__(self, name: str) -> None:
+        del self._types[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._types)
+
+    def __len__(self) -> int:
+        return len(self._types)
+
+    def __eq__(self, other: object) -> bool:
+        # Like OrderedDict, selections are only compared with other Types.
+        if isinstance(other, Types):
+            return (self._types, self._selections) == (
+                other._types,
+                other._selections,
+            )
+        return super().__eq__(other)
+
+    def __repr__(self) -> str:
+        return (
+            f"<{type(self).__name__} {self._types!r} selections={self._selections!r}>"
+        )
+
+    def __copy__(self) -> Self:
+        new = type(self)(self._types)
+        new._selections = self._selections.copy()
+        return new
+
+    copy = __copy__
+
+    def update(self, other: _TypesInit = (), /, **kwargs: Iterable[str]) -> None:
+        # Overridden to accept any iterable of globs as values.
+        super().update(other, **kwargs)  # type: ignore[arg-type]
+
+    def setdefault(self, name: str, default: Iterable[str] = (), /) -> tuple[str, ...]:
+        if name not in self._types:
+            self[name] = default
+        return self._types[name]
+
+    def popitem(self) -> tuple[str, tuple[str, ...]]:
+        return self._types.popitem()
+
+    def clear(self) -> None:
+        self._types.clear()
+
+    def add(self, name: str, glob: str) -> None:
+        """Add ``glob`` to the file type ``name``, creating it if necessary."""
+        self[name] = (*self._types.get(name, ()), glob)
+
+    def add_defaults(self) -> None:
+        """Add the default file types from the ``ignore`` crate."""
+        for name, globs in _lib.default_types():
+            self[name] = (*self._types.get(name, ()), *globs)
+
+    def select(self, name: str) -> None:
+        """Select the file type given by ``name``.
+
+        If ``name`` is ``all``, then all file types currently defined are
+        selected.
+        """
+        self._selections.extend(Select(name) for name in self._expand(name))
+
+    def negate(self, name: str) -> None:
+        """Ignore the file type given by ``name``.
+
+        If ``name`` is ``all``, then all file types currently defined are
+        negated.
+        """
+        self._selections.extend(Negate(name) for name in self._expand(name))
+
+    def selections(self) -> Iterator[Selection]:
+        """Return an iterator over the selections and negations, in order."""
+        return iter(tuple(self._selections))
+
+    def _expand(self, name: str) -> list[str]:
+        return list(self._types) if name == "all" else [name]
