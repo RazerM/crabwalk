@@ -1,5 +1,6 @@
 import gc
 import os
+import random
 import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -916,3 +917,27 @@ def test_filter_entry_error(tree_path: Path, walk_paths: WalkPaths) -> None:
         list(walk_paths(walk))
     # Python isn't called again once a callback has raised.
     assert calls == ["root/a"]
+
+
+def test_sort_key_inconsistent_order(tmp_path: Path) -> None:
+    for i in range(40):
+        (tmp_path / str(i)).touch()
+
+    rng = random.Random(0)
+
+    class RandomOrder:
+        def __init__(self, path: str) -> None:
+            pass
+
+        def __lt__(self, other: "RandomOrder") -> bool:
+            return rng.random() < 0.5
+
+    # Rust's sort may detect the inconsistency and panic, which must not
+    # escape as a BaseException.
+    for _ in range(10):
+        with Walk(tmp_path, sort=RandomOrder) as walk:
+            try:
+                list(walk)
+            except ValueError as exc:
+                assert str(exc) == "sort key does not define a consistent order"
+                assert list(walk) == []

@@ -1,6 +1,8 @@
 #![deny(rust_2018_idioms)]
 
+use std::any::Any;
 use std::ffi::OsString;
+use std::panic::{self, AssertUnwindSafe};
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
@@ -504,7 +506,22 @@ impl Walk {
             return Ok(None);
         };
 
-        while let Some(dent) = py.detach(|| walk.next()) {
+        loop {
+            // Sorting with a Python key that doesn't define a total order can
+            // make Rust's sort panic.
+            let next = py.detach(|| panic::catch_unwind(AssertUnwindSafe(|| walk.next())));
+            let dent = match next {
+                Ok(Some(dent)) => dent,
+                Ok(None) => break,
+                Err(payload) => {
+                    self.state = State::Closed;
+                    return Err(self
+                        .callback_error
+                        .take()
+                        .unwrap_or_else(|| walk_panic_error(payload)));
+                }
+            };
+
             if let Some(err) = self.callback_error.take() {
                 // Don't pass user-caused errors through onerror, raise directly
                 return Err(err);
@@ -789,6 +806,19 @@ impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
             SortValue::Bool(sort) => Ok(PyBool::new(py, *sort).into_any()),
         }
     }
+}
+
+/// Convert a panic from the walker into an exception if it was caused by an
+/// inconsistent sort key, otherwise keep panicking.
+fn walk_panic_error(payload: Box<dyn Any + Send>) -> PyErr {
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str));
+    if message.is_some_and(|message| message.contains("total order")) {
+        return PyValueError::new_err("sort key does not define a consistent order");
+    }
+    panic::resume_unwind(payload)
 }
 
 fn convert_and_call_onerror(onerror: &Bound<'_, PyAny>, err: ignore::Error) -> PyResult<()> {
