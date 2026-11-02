@@ -301,7 +301,7 @@ impl Types {
 
     fn __eq__(&self, py: Python<'_>, other: &Self) -> PyResult<bool> {
         if self.selections.len() != other.selections.len() {
-            return Ok(false)
+            return Ok(false);
         }
 
         let types = self.types.as_ref().as_ref().unwrap().bind(py);

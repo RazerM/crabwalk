@@ -75,8 +75,10 @@ impl From<IgnoreError> for PyErr {
                         Err(err) => return err,
                         Ok(error_type) => error_type,
                     };
-                    let py_errors: Vec<PyErr> =
-                        errors.into_iter().map(|err| IgnoreError(err).into()).collect();
+                    let py_errors: Vec<PyErr> = errors
+                        .into_iter()
+                        .map(|err| IgnoreError(err).into())
+                        .collect();
                     match partial_error_type.call1((py_errors,)) {
                         Err(err) => err,
                         Ok(err) => PyErr::from_value(err),

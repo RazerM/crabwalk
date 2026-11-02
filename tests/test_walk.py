@@ -114,7 +114,7 @@ def test_follow_symlinks(tree_path: Path, walk_paths: WalkPaths) -> None:
     assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
 
     walk = Walk("root", sort=True)
-    assert walk.follow_symlinks == False
+    assert walk.follow_symlinks is False
     walk.follow_symlinks = True
     assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
 
@@ -536,7 +536,7 @@ def test_stat_cached(
     tree_path: Path, walk_entries: WalkEntries, stat_before_delete: bool
 ) -> None:
     root_path = tree_path / "root"
-    root, foo = walk_entries(Walk(root_path, sort=True))
+    _root, foo = walk_entries(Walk(root_path, sort=True))
     if stat_before_delete:
         foo.stat()
     Path(foo).unlink()

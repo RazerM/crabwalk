@@ -126,7 +126,8 @@ def coerce_override(v: object) -> Override:
         v = Override(v)
 
     if not isinstance(v, tuple):
-        raise TypeError(f"Expected a (str, bool) tuple, got {v!r}")
+        msg = f"Expected a (str, bool) tuple, got {v!r}"
+        raise TypeError(msg)
 
     return Override._make(v)
 
@@ -163,10 +164,11 @@ class Overrides(MutableSequence[OverrideT]):
     ) -> None:
         path = os.fspath(path)
         if not isinstance(path, str):
-            raise TypeError(
+            msg = (
                 "path must be a str object or an os.PathLike object returning "
                 f"str, not {type(path)}"
             )
+            raise TypeError(msg)
         self._path = path
         self._overrides = []
         self.extend(overrides)
