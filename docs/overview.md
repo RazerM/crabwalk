@@ -19,6 +19,11 @@ with Walk(".") as walk:
 Like {func}`os.walk`, errors are ignored by default. You must set an `onerror`
 function if you want to report the error or re-raise it to abort the walk.
 
+File system errors are passed as {exc}`OSError` subclasses (like
+{exc}`PermissionError`) with `errno`, `strerror`, and `filename` set, the same
+as {func}`os.scandir` would raise. If the error happened while walking, it also
+has a `depth` attribute. Other errors are subclasses of {exc}`WalkError`.
+
 ```python
 def onerror(exc):
     print(exc)

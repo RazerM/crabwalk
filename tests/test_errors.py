@@ -1,4 +1,6 @@
+import errno
 import os
+import sys
 from pathlib import Path
 from typing import NoReturn
 
@@ -139,3 +141,46 @@ def test_partial_error(tmp_path: Path) -> None:
         "missing '}' (maybe escape '{' with '[{]'?)"
     )
     assert exc_info.value.errors[1].line == 2
+
+
+def test_missing_path(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    errors: list[Exception] = []
+
+    with Walk(missing, onerror=errors.append) as walk:
+        assert list(walk) == []
+
+    [error] = errors
+    assert isinstance(error, FileNotFoundError)
+    assert error.errno == errno.ENOENT
+    assert error.strerror == os.strerror(errno.ENOENT)
+    assert error.filename == str(missing)
+    assert error.depth == 0  # type: ignore[attr-defined]
+    assert str(error) == f"[Errno 2] No such file or directory: {str(missing)!r}"
+
+    copy = pickle.loads(pickle.dumps(error))
+    assert type(copy) is FileNotFoundError
+    assert copy.filename == str(missing)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="needs POSIX permissions and a non-root user",
+)
+def test_permission_error(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    errors: list[Exception] = []
+
+    try:
+        with Walk(tmp_path, onerror=errors.append) as walk:
+            assert [entry.path for entry in walk] == [str(tmp_path), str(locked)]
+    finally:
+        locked.chmod(0o700)
+
+    [error] = errors
+    assert isinstance(error, PermissionError)
+    assert error.errno == errno.EACCES
+    assert error.filename == str(locked)
+    assert error.depth == 1  # type: ignore[attr-defined]
