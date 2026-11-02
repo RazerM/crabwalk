@@ -1,6 +1,9 @@
 ---
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: ["main"]
@@ -9,9 +12,21 @@ on:
   workflow_dispatch:
 
 env:
+  FORCE_COLOR: "1"
   UV_NO_SYNC: "1"
+  UV_PYTHON_DOWNLOADS: "false"
 
 jobs:
+  pre-commit:
+    name: "pre-commit"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: "j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d" # v3.1.0
+
   tests:
     name: "Python ${{ matrix.python-version }}"
     runs-on: "ubuntu-latest"
@@ -22,15 +37,19 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: "actions/checkout@v4"
-      - uses: "astral-sh/setup-uv@v3"
-      - uses: "actions/setup-python@v5"
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0" # v7.1.0
         with:
           python-version: "${{ matrix.python-version }}"
+          allow-prereleases: true
+      - uses: "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2" # v10.3.3
+        with:
+          enable-cache: true
       - run: rustup component add llvm-tools-preview
       - name: "Install dependencies"
         run: |
-          set -xe
           python -VV
           rustc --version
           python -m site
@@ -43,7 +62,7 @@ jobs:
           uv run coverage combine
           uv run coverage xml
       - name: "Upload coverage to Codecov"
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -59,22 +78,41 @@ jobs:
         rust-version: ["1.65.0"]
 
     steps:
-      - uses: "actions/checkout@v4"
-      - uses: "astral-sh/setup-uv@v3"
-      - uses: "actions/setup-python@v5"
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0" # v7.1.0
         with:
           python-version: "${{ matrix.python-version }}"
-      - uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
+      - uses: "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2" # v10.3.3
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
         with:
           toolchain: ${{ matrix.rust-version }}
-      - run: rustup component add llvm-tools-preview
+          components: llvm-tools-preview
       - name: "Install dependencies"
         run: |
-          set -xe
           python -VV
           rustc --version
           python -m site
           uv --version
           uv sync --no-install-project --no-dev --group nox
       - name: "Run nox"
-        run: "uv run nox --python ${{ matrix.python-version }} -e tests"
+        run: "uv run nox --python ${{ matrix.python-version }} -s tests"
+
+  required:
+    name: "all required checks passed"
+    runs-on: "ubuntu-latest"
+    if: always()
+
+    needs:
+      - pre-commit
+      - tests
+      - msrv
+
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}
