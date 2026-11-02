@@ -248,6 +248,16 @@ class Overrides(MutableSequence[OverrideT]):
         cls = type(self)
         return f"{cls.__name__}({self._overrides!r}, path={self._path!r})"
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Overrides):
+            return (self._path, self._overrides) == (other._path, other._overrides)
+        return NotImplemented
+
+    def __copy__(self) -> Self:
+        return type(self)(self._overrides, path=self._path)
+
+    copy = __copy__
+
 
 @dataclass(frozen=True, slots=True)
 class Select:
