@@ -40,6 +40,7 @@ class Walk:
         cls,
         *paths: StrPath,
         max_depth: int | None = ...,
+        min_depth: int | None = ...,
         follow_symlinks: bool = ...,
         max_filesize: int | None = ...,
         global_ignore_files: Sequence[StrPath] | None = ...,
@@ -65,6 +66,7 @@ class Walk:
     @property
     def paths(self) -> list[StrPath]: ...
     max_depth: int | None
+    min_depth: int | None
     follow_symlinks: bool
     max_filesize: int | None
     @property

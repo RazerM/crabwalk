@@ -16,6 +16,9 @@ API Reference
     :type paths: typing.Union[str, os.PathLike[str]]
     :param max_depth: The maximum depth to recurse.
     :type max_depth: typing.Optional[int]
+    :param min_depth: The minimum depth of entries to yield. Shallower
+        directories are still traversed.
+    :type min_depth: typing.Optional[int]
     :param follow_symlinks: Whether to follow symbolic links or not.
     :type follow_symlinks: bool
     :param max_filesize: Whether to ignore files above the specified limit.

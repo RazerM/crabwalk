@@ -89,6 +89,75 @@ def test_max_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
     ),
     chdir=True,
 )
+def test_min_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
+    walk = Walk("root", min_depth=2, sort=True)
+    assert walk.min_depth == 2
+    assert list(walk_paths(walk)) == ["root/1/2", "root/1/2/3"]
+
+    walk = Walk("root", min_depth=1, max_depth=2, sort=True)
+    assert list(walk_paths(walk)) == ["root/1", "root/1/2"]
+
+    walk = Walk("root", sort=True)
+    assert walk.min_depth is None
+    walk.min_depth = 3
+    assert list(walk_paths(walk)) == ["root/1/2/3"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File(".ignore", "ignored*\n"),
+        File("ignored_top"),
+        File("keep"),
+        Directory(
+            "a",
+            File("ignored_a"),
+            File("x"),
+        ),
+    ),
+    chdir=True,
+)
+@pytest.mark.parametrize("standard_filters", [True, False])
+def test_min_depth_ignore_files(
+    tree_path: Path, walk_paths: WalkPaths, standard_filters: bool
+) -> None:
+    walk = Walk("root", min_depth=1, sort=True)
+    if not standard_filters:
+        walk.disable_standard_filters()
+    expected = ["root/a", "root/a/x", "root/keep"]
+    if not standard_filters:
+        expected = [
+            "root/.ignore",
+            "root/a",
+            "root/a/ignored_a",
+            "root/a/x",
+            "root/ignored_top",
+            "root/keep",
+        ]
+    assert list(walk_paths(walk)) == expected
+
+
+def test_min_depth_greater_than_max_depth() -> None:
+    with (
+        pytest.raises(ValueError, match="min_depth must not be greater"),
+        Walk(".", min_depth=2, max_depth=1) as walk,
+    ):
+        next(walk)
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        Directory(
+            "1",
+            Directory(
+                "2",
+                Directory("3"),
+            ),
+        ),
+    ),
+    chdir=True,
+)
 def test_depth(tree_path: Path, walk_entries: WalkEntries) -> None:
     walk = Walk("root", max_depth=2, sort=True)
     assert [entry.depth for entry in walk_entries(walk)] == [0, 1, 2]

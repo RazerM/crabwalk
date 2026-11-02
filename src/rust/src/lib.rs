@@ -53,6 +53,7 @@ pub struct Walk {
     state: State,
     paths: Option<Py<PyList>>, // Only None after tp_clear
     max_depth: Option<usize>,
+    min_depth: Option<usize>,
     follow_symlinks: bool,
     max_filesize: Option<u64>,
     global_ignore_files: Option<Py<PyList>>, // Only None after tp_clear
@@ -81,6 +82,7 @@ impl Walk {
         signature = (
             *paths,
             max_depth = None,
+            min_depth = None,
             follow_symlinks = false,
             max_filesize = None,
             global_ignore_files = None,
@@ -107,6 +109,7 @@ impl Walk {
         py: Python<'py>,
         paths: &Bound<'py, PyTuple>,
         max_depth: Option<usize>,
+        min_depth: Option<usize>,
         follow_symlinks: bool,
         max_filesize: Option<u64>,
         global_ignore_files: Option<&Bound<'py, PySequence>>,
@@ -144,6 +147,7 @@ impl Walk {
             state: State::Unopened,
             paths: Some(paths.unbind()),
             max_depth,
+            min_depth,
             follow_symlinks,
             max_filesize,
             global_ignore_files,
@@ -208,6 +212,18 @@ impl Walk {
     fn set_max_depth(&mut self, value: Option<usize>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.max_depth = value;
+        Ok(())
+    }
+
+    #[getter]
+    fn min_depth(&self) -> Option<usize> {
+        self.min_depth
+    }
+
+    #[setter]
+    fn set_min_depth(&mut self, value: Option<usize>) -> PyResult<()> {
+        self.check_not_started_setter()?;
+        self.min_depth = value;
         Ok(())
     }
 
@@ -492,8 +508,16 @@ impl Walk {
 
             match dent {
                 Ok(dent) => {
-                    if let Some(err) = dent.error() {
-                        self.convert_and_call_onerror(py, err.clone())?;
+                    if let (Some(err), Some(onerror)) = (dent.error(), &self.onerror) {
+                        convert_and_call_onerror(onerror.bind(py), err.clone())?;
+                    }
+                    // WalkBuilder::min_depth stops ignore files in shallower
+                    // directories from being read, so filter here instead.
+                    if self
+                        .min_depth
+                        .is_some_and(|min_depth| dent.depth() < min_depth)
+                    {
+                        continue;
                     }
                     return Ok(Some(DirEntry::new(dent, self.follow_symlinks)));
                 }
@@ -577,6 +601,14 @@ impl Walk {
         if paths.iter().any(|path| path == "-") {
             return Err(PyValueError::new_err(
                 "path cannot be '-', use './-' if you need this",
+            ));
+        }
+
+        if let (Some(min_depth), Some(max_depth)) = (self.min_depth, self.max_depth)
+            && min_depth > max_depth
+        {
+            return Err(PyValueError::new_err(
+                "min_depth must not be greater than max_depth",
             ));
         }
 
