@@ -1,15 +1,9 @@
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Union
+from typing import Protocol, TypeAlias
 
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias
-else:
-    from typing_extensions import TypeAlias
-
-StrPath: TypeAlias = "Union[str, os.PathLike[str]]"
+StrPath: TypeAlias = "str | os.PathLike[str]"
 
 
 class FsItem(Protocol):
@@ -35,10 +29,12 @@ class Directory:
 class Symlink:
     name: str
     target: str
+    # Windows needs to know whether the target is a directory.
+    directory: bool = False
 
     def create(self, path: StrPath) -> None:
         source = Path(path, self.name)
-        os.symlink(Path(path, self.target), source)
+        os.symlink(Path(path, self.target), source, target_is_directory=self.directory)
 
 
 @dataclass

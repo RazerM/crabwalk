@@ -1,7 +1,11 @@
+import gc
 import os
-import sys
+import random
+import re
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import TypeAlias
 from unittest.mock import Mock
 
 import pytest
@@ -9,12 +13,6 @@ import pytest
 from crabwalk import DirEntry, Overrides, Types, Walk
 
 from .tree import Directory, File, Symlink
-
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias
-else:
-    from typing_extensions import TypeAlias
-
 
 WalkPaths: TypeAlias = Callable[[Walk], Iterator[str]]
 WalkEntries: TypeAlias = Callable[[Walk], Iterator[DirEntry]]
@@ -34,9 +32,14 @@ def walk_paths_fixture() -> WalkPaths:
     def walk_paths(walk: Walk) -> Iterator[str]:
         with walk:
             for entry in walk:
-                yield entry.path
+                yield as_posix(entry.path)
 
     return walk_paths
+
+
+def as_posix(path: str) -> str:
+    """Use / to compare paths, which the walker joins with os.sep."""
+    return path.replace(os.sep, "/")
 
 
 @pytest.mark.tree(
@@ -74,11 +77,103 @@ def test_max_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
     walk = Walk("root", max_depth=2, sort=True)
     assert list(walk_paths(walk)) == ["root", "root/1", "root/1/2"]
 
+    walk = Walk("root", sort=True)
+    assert walk.max_depth is None
+    walk.max_depth = 1
+    assert list(walk_paths(walk)) == ["root", "root/1"]
+
 
 @pytest.mark.tree(
     Directory(
         "root",
-        Symlink("linked", "../sibling"),
+        Directory(
+            "1",
+            Directory(
+                "2",
+                Directory("3"),
+            ),
+        ),
+    ),
+    chdir=True,
+)
+def test_min_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
+    walk = Walk("root", min_depth=2, sort=True)
+    assert walk.min_depth == 2
+    assert list(walk_paths(walk)) == ["root/1/2", "root/1/2/3"]
+
+    walk = Walk("root", min_depth=1, max_depth=2, sort=True)
+    assert list(walk_paths(walk)) == ["root/1", "root/1/2"]
+
+    walk = Walk("root", sort=True)
+    assert walk.min_depth is None
+    walk.min_depth = 3
+    assert list(walk_paths(walk)) == ["root/1/2/3"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File(".ignore", "ignored*\n"),
+        File("ignored_top"),
+        File("keep"),
+        Directory(
+            "a",
+            File("ignored_a"),
+            File("x"),
+        ),
+    ),
+    chdir=True,
+)
+@pytest.mark.parametrize("standard_filters", [True, False])
+def test_min_depth_ignore_files(
+    tree_path: Path, walk_paths: WalkPaths, standard_filters: bool
+) -> None:
+    walk = Walk("root", min_depth=1, sort=True)
+    if not standard_filters:
+        walk.disable_standard_filters()
+    expected = ["root/a", "root/a/x", "root/keep"]
+    if not standard_filters:
+        expected = [
+            "root/.ignore",
+            "root/a",
+            "root/a/ignored_a",
+            "root/a/x",
+            "root/ignored_top",
+            "root/keep",
+        ]
+    assert list(walk_paths(walk)) == expected
+
+
+def test_min_depth_greater_than_max_depth() -> None:
+    with (
+        pytest.raises(ValueError, match="min_depth must not be greater"),
+        Walk(".", min_depth=2, max_depth=1) as walk,
+    ):
+        next(walk)
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        Directory(
+            "1",
+            Directory(
+                "2",
+                Directory("3"),
+            ),
+        ),
+    ),
+    chdir=True,
+)
+def test_depth(tree_path: Path, walk_entries: WalkEntries) -> None:
+    walk = Walk("root", max_depth=2, sort=True)
+    assert [entry.depth for entry in walk_entries(walk)] == [0, 1, 2]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        Symlink("linked", "../sibling", directory=True),
     ),
     Directory(
         "sibling",
@@ -88,6 +183,11 @@ def test_max_depth(tree_path: Path, walk_paths: WalkPaths) -> None:
 )
 def test_follow_symlinks(tree_path: Path, walk_paths: WalkPaths) -> None:
     walk = Walk("root", follow_symlinks=True, sort=True)
+    assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
+
+    walk = Walk("root", sort=True)
+    assert walk.follow_symlinks is False
+    walk.follow_symlinks = True
     assert list(walk_paths(walk)) == ["root", "root/linked", "root/linked/foo"]
 
 
@@ -102,6 +202,11 @@ def test_follow_symlinks(tree_path: Path, walk_paths: WalkPaths) -> None:
 )
 def test_max_filesize(tree_path: Path, walk_paths: WalkPaths) -> None:
     walk = Walk("root", max_filesize=2, sort=True)
+    assert list(walk_paths(walk)) == ["root", "root/one", "root/two"]
+
+    walk = Walk("root", sort=True)
+    assert walk.max_filesize is None
+    walk.max_filesize = 2
     assert list(walk_paths(walk)) == ["root", "root/one", "root/two"]
 
 
@@ -149,8 +254,18 @@ def test_custom_ignore_filenames(tree_path: Path, walk_paths: WalkPaths) -> None
     chdir=True,
 )
 def test_overrides(tree_path: Path, walk_paths: WalkPaths) -> None:
-    walk = Walk("root", overrides=Overrides(["!foo"], path="root"), sort=True)
+    overrides = Overrides(["!foo"], path="root")
+    walk = Walk("root", overrides=overrides, sort=True)
+    assert walk.overrides is overrides
     assert list(walk_paths(walk)) == ["root", "root/bar"]
+
+
+def test_overrides_setter_type() -> None:
+    with pytest.raises(TypeError, match="must be an Overrides instance"):
+        Walk("root", overrides=123)  # type: ignore[arg-type]
+    walk = Walk("root")
+    with pytest.raises(TypeError, match="must be an Overrides instance"):
+        walk.overrides = "foo"  # type: ignore[assignment]
 
 
 @pytest.mark.tree(
@@ -167,6 +282,35 @@ def test_types(tree_path: Path, walk_paths: WalkPaths) -> None:
     types.select("rust")
     walk = Walk("root", types=types, sort=True)
     assert list(walk_paths(walk)) == ["root", "root/foo.rs"]
+
+    walk = Walk("root", sort=True)
+    assert walk.types is None
+    walk.types = types
+    assert list(walk_paths(walk)) == ["root", "root/foo.rs"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo.py"),
+        File("foo.rs"),
+        File("foo.txt"),
+    ),
+    chdir=True,
+)
+def test_types_negate(tree_path: Path, walk_paths: WalkPaths) -> None:
+    types = Types({"rust": ["*.rs"]})
+    types.negate("rust")
+    walk = Walk("root", types=types, sort=True)
+    assert list(walk_paths(walk)) == ["root", "root/foo.py", "root/foo.txt"]
+
+
+def test_types_setter_type() -> None:
+    with pytest.raises(TypeError, match="must be a Types instance"):
+        Walk("root", types={"py": ["*.py"]})  # type: ignore[arg-type]
+    walk = Walk("root")
+    with pytest.raises(TypeError, match="must be a Types instance"):
+        walk.types = {"py": ["*.py"]}  # type: ignore[assignment]
 
 
 @pytest.mark.tree(
@@ -255,6 +399,11 @@ def test_git_ignore(
     tree_path: Path, walk_paths: WalkPaths, git_ignore: bool, paths: list[str]
 ) -> None:
     walk = Walk("root", git_ignore=git_ignore, require_git=False, sort=True)
+    assert list(walk_paths(walk)) == paths
+
+    walk = Walk("root", git_ignore=git_ignore, sort=True)
+    assert walk.require_git
+    walk.require_git = False
     assert list(walk_paths(walk)) == paths
 
 
@@ -350,9 +499,33 @@ def test_sort_function(
 
     mock_sort = Mock(wraps=sort)
     walk = Walk("root", sort=mock_sort)
-    assert walk.sort == mock_sort
+    assert walk.sort is mock_sort
     assert list(walk_paths(walk)) == ["root", "root/a", "root/b"]
-    assert {args[0] for _, args, _ in mock_sort.mock_calls} == {"root/a", "root/b"}
+    assert {as_posix(args[0]) for _, args, _ in mock_sort.mock_calls} == {
+        "root/a",
+        "root/b",
+    }
+
+    walk = Walk("root")
+    assert walk.sort is False
+    walk.sort = mock_sort
+    assert list(walk_paths(walk)) == ["root", "root/a", "root/b"]
+    assert {as_posix(args[0]) for _, args, _ in mock_sort.mock_calls} == {
+        "root/a",
+        "root/b",
+    }
+
+
+@pytest.mark.parametrize("value", [0, 1, "", None, 42])
+def test_sort_type_error(value: object) -> None:
+    if value is not None:
+        with pytest.raises(TypeError):
+            walk = Walk(".", sort=value)  # type: ignore[arg-type]
+
+    walk = Walk(".")
+    with pytest.raises(TypeError):
+        walk.sort = value  # type: ignore[assignment]
+    assert walk.sort is False
 
 
 @pytest.mark.tree(
@@ -438,7 +611,7 @@ def test_filter_entry_exception(tree_path: Path) -> None:
 def test_direntry_fspath(tree_path: Path, walk_entries: WalkEntries) -> None:
     root, foo = walk_entries(Walk("root", sort=True))
     assert os.fspath(root) == root.path == "root"
-    assert os.fspath(foo) == foo.path == "root/foo"
+    assert os.fspath(foo) == foo.path == os.path.join("root", "foo")
 
 
 @pytest.mark.tree(
@@ -457,10 +630,33 @@ def test_direntry_fspath_absolute(tree_path: Path, walk_entries: WalkEntries) ->
 @pytest.mark.tree(
     Directory(
         "root",
+        File("foo"),
+    ),
+)
+@pytest.mark.parametrize("stat_before_delete", [True, False])
+def test_stat_cached(
+    tree_path: Path, walk_entries: WalkEntries, stat_before_delete: bool
+) -> None:
+    root_path = tree_path / "root"
+    _root, foo = walk_entries(Walk(root_path, sort=True))
+    if stat_before_delete:
+        foo.stat()
+    Path(foo).unlink()
+    if stat_before_delete:
+        # not only will this not raise but the same object must be returned
+        assert foo.stat() is foo.stat()
+    else:
+        with pytest.raises(FileNotFoundError):
+            foo.stat()
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
         File("file1"),
         Directory("dir1"),
         Symlink("link1", "file1"),
-        Symlink("link2", "dir1"),
+        Symlink("link2", "dir1", directory=True),
     ),
     chdir=True,
 )
@@ -473,12 +669,7 @@ def test_direntry_against_os_direntry(tree_path: Path, follow_symlinks: bool) ->
     with os.scandir("root") as it:
         os_entries = sorted(it, key=lambda entry: entry.path)
 
-    assert [entry.path for entry in os_entries] == [
-        "root/dir1",
-        "root/file1",
-        "root/link1",
-        "root/link2",
-    ]
+    assert [entry.name for entry in os_entries] == ["dir1", "file1", "link1", "link2"]
 
     with Walk("root", follow_symlinks=follow_symlinks) as walk:
         root = next(walk)
@@ -499,5 +690,264 @@ def test_direntry_against_os_direntry(tree_path: Path, follow_symlinks: bool) ->
         assert os_entry.is_dir(follow_symlinks=follow_symlinks) == cw_entry.is_dir()
         assert os_entry.is_file(follow_symlinks=follow_symlinks) == cw_entry.is_file()
         assert os_entry.is_symlink() == cw_entry.is_symlink()
-        assert os_entry.stat(follow_symlinks=follow_symlinks) == cw_entry.stat()
+        # Not os_entry.stat(), which leaves st_ino, st_dev and st_nlink as zero
+        # on Windows.
+        assert os.stat(os_entry, follow_symlinks=follow_symlinks) == cw_entry.stat()
         assert cw_entry.follow_symlinks == follow_symlinks
+
+
+def test_standard_filters() -> None:
+    walk = Walk(".")
+    assert walk.hidden
+    assert walk.parents
+    assert walk.ignore
+    assert walk.git_ignore
+    assert walk.git_global
+    assert walk.git_exclude
+    walk.disable_standard_filters()
+    # mypy doesn't handle methods that mutate attributes and thinks some
+    # code below is unreachable.
+    # https://github.com/python/mypy/issues/17537
+    assert not walk.hidden
+    assert not walk.parents  # type: ignore[unreachable]
+    assert not walk.ignore
+    assert not walk.git_ignore
+    assert not walk.git_global
+    assert not walk.git_exclude
+    walk.enable_standard_filters()
+    assert walk.hidden
+    assert walk.parents
+    assert walk.ignore
+    assert walk.git_ignore
+    assert walk.git_global
+    assert walk.git_exclude
+
+    walk.hidden = False
+    walk.parents = False
+    walk.ignore = False
+    walk.git_ignore = False
+    walk.git_global = False
+    walk.git_exclude = False
+    assert not walk.hidden
+    assert not walk.parents
+    assert not walk.ignore
+    assert not walk.git_ignore
+    assert not walk.git_global
+    assert not walk.git_exclude
+
+
+@pytest.mark.parametrize("paths", [["a"], ["a", "b"], ["./a"]])
+def test_paths(paths: list[str]) -> None:
+    walk = Walk(*paths)
+    assert walk.paths == paths
+
+
+def test_exit_propagates_base_exception() -> None:
+    with pytest.raises(KeyboardInterrupt), Walk("."):
+        raise KeyboardInterrupt
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_exhausted_walk_is_closed(tree_path: Path) -> None:
+    walk = Walk("root")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert len(list(walk)) == 2
+        del walk
+        gc.collect()
+    assert caught == []
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_unclosed_walk_warns(tree_path: Path) -> None:
+    walk = Walk("root")
+    next(walk)
+    with pytest.warns(ResourceWarning, match="Unclosed Walk iterator"):
+        del walk
+        gc.collect()
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_next_after_close(tree_path: Path) -> None:
+    with Walk("root") as walk:
+        next(walk)
+        walk.close()
+        with pytest.raises(StopIteration):
+            next(walk)
+
+    with Walk("root") as walk:
+        assert len(list(walk)) == 2
+        assert list(walk) == []
+
+
+@pytest.mark.tree(
+    Directory(
+        "-",
+        File("foo"),
+    ),
+    chdir=True,
+)
+def test_dash_path(tree_path: Path, walk_paths: WalkPaths) -> None:
+    with pytest.raises(ValueError, match=r"use '\./-'"):
+        list(walk_paths(Walk("-")))
+    assert list(walk_paths(Walk("./-", sort=True))) == ["./-", "./-/foo"]
+
+
+def test_no_paths() -> None:
+    with (
+        pytest.raises(TypeError, match="Must specify at least one path"),
+        Walk() as walk,
+    ):
+        next(walk)
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        Directory(
+            "b",
+            File("c"),
+            File("d"),
+            File("e"),
+        ),
+        File("f"),
+    ),
+    chdir=True,
+)
+def test_sort_key_called_once_per_entry(tree_path: Path, walk_paths: WalkPaths) -> None:
+    key = Mock(wraps=str)
+    walk = Walk("root", sort=key)
+    assert list(walk_paths(walk)) == [
+        "root",
+        "root/a",
+        "root/b",
+        "root/b/c",
+        "root/b/d",
+        "root/b/e",
+        "root/f",
+    ]
+    assert sorted(as_posix(call.args[0]) for call in key.call_args_list) == [
+        "root/a",
+        "root/b",
+        "root/b/c",
+        "root/b/d",
+        "root/b/e",
+        "root/f",
+    ]
+
+
+class LessThanOnly:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __lt__(self, other: "LessThanOnly") -> bool:
+        return self.value > other.value
+
+    def __gt__(self, other: "LessThanOnly") -> bool:
+        pytest.fail("sort keys should only be compared with <")
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+        File("c"),
+    ),
+    chdir=True,
+)
+def test_sort_key_uses_less_than(tree_path: Path, walk_paths: WalkPaths) -> None:
+    walk = Walk("root", sort=LessThanOnly)
+    assert list(walk_paths(walk)) == ["root", "root/c", "root/b", "root/a"]
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+        File("c"),
+        File("d"),
+    ),
+    chdir=True,
+)
+@pytest.mark.parametrize("with_filter_entry", [False, True])
+def test_sort_key_error(
+    tree_path: Path, walk_paths: WalkPaths, with_filter_entry: bool
+) -> None:
+    def key(path: str) -> str:
+        raise ZeroDivisionError(path)
+
+    walk = Walk("root", sort=key)
+    if with_filter_entry:
+        walk.filter_entry = lambda entry: True
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        list(walk_paths(walk))
+    assert exc_info.value.__context__ is None
+
+
+@pytest.mark.tree(
+    Directory(
+        "root",
+        File("a"),
+        File("b"),
+        File("c"),
+    ),
+    chdir=True,
+)
+def test_filter_entry_error(tree_path: Path, walk_paths: WalkPaths) -> None:
+    calls = []
+
+    def filter_entry(entry: DirEntry) -> bool:
+        calls.append(entry.path)
+        raise ZeroDivisionError(entry.path)
+
+    walk = Walk("root", sort=True, filter_entry=filter_entry)
+    path = os.path.join("root", "a")
+    with pytest.raises(ZeroDivisionError, match=re.escape(path)):
+        list(walk_paths(walk))
+    # Python isn't called again once a callback has raised.
+    assert calls == [path]
+
+
+def test_sort_key_inconsistent_order(tmp_path: Path) -> None:
+    for i in range(40):
+        (tmp_path / str(i)).touch()
+
+    rng = random.Random(0)
+
+    class RandomOrder:
+        def __init__(self, path: str) -> None:
+            pass
+
+        def __lt__(self, other: "RandomOrder") -> bool:
+            return rng.random() < 0.5
+
+    # Rust's sort may detect the inconsistency and panic, which must not
+    # escape as a BaseException.
+    for _ in range(10):
+        with Walk(tmp_path, sort=RandomOrder) as walk:
+            try:
+                list(walk)
+            except ValueError as exc:
+                assert str(exc) == "sort key does not define a consistent order"
+                assert list(walk) == []

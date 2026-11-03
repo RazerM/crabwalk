@@ -1,34 +1,49 @@
 #![deny(rust_2018_idioms)]
 
-use std::cmp::Ordering;
+use std::any::Any;
 use std::ffi::OsString;
-use std::path::Path;
-use std::ptr;
+use std::panic::{self, AssertUnwindSafe};
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
-use pyo3::exceptions::{PyException, PyRuntimeError, PyTypeError};
+use pyo3::exceptions::{PyResourceWarning, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::sync::GILOnceCell;
-use pyo3::types::{PyList, PySequence, PyString, PyTraceback, PyTuple, PyType};
-use pyo3::{ffi, PyTraverseError, PyTypeInfo, PyVisit};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
+use pyo3::{BoundObject, PyTraverseError, PyVisit};
 
+use crate::callback::CallbackError;
 use crate::direntry::DirEntry;
-use crate::error::IntoPyErr;
-use crate::types::{Selection, Types};
+use crate::error::IgnoreError;
+use crate::sort::KeyComparator;
 use crate::util::{fspath, fspath_list};
 
+mod callback;
 mod direntry;
 mod error;
+mod sort;
 mod types;
 mod util;
 
-static TYPES_MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
-static KEYS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
-static ITEMS_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
-static VALUES_VIEW_TYPE: GILOnceCell<Py<PyType>> = GILOnceCell::new();
-static OS_STAT: GILOnceCell<PyObject> = GILOnceCell::new();
+static TYPES_MODULE: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
+static OS_STAT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// The `crabwalk._types` module, imported on first use to avoid a circular
+/// import (it imports this module).
+fn types_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+    TYPES_MODULE
+        .get_or_try_init(py, || Ok(py.import("crabwalk._types")?.unbind()))
+        .map(|module| module.bind(py))
+}
+
+fn check_instance(value: &Bound<'_, PyAny>, type_name: &str, msg: &'static str) -> PyResult<()> {
+    let expected = types_module(value.py())?.getattr(type_name)?;
+    if !value.is_instance(&expected)? {
+        return Err(PyTypeError::new_err(msg));
+    }
+    Ok(())
+}
 
 enum State {
     Unopened,
@@ -42,12 +57,13 @@ pub struct Walk {
     state: State,
     paths: Option<Py<PyList>>, // Only None after tp_clear
     max_depth: Option<usize>,
+    min_depth: Option<usize>,
     follow_symlinks: bool,
     max_filesize: Option<u64>,
     global_ignore_files: Option<Py<PyList>>, // Only None after tp_clear
     custom_ignore_filenames: Option<Py<PyList>>, // Only None after tp_clear
-    overrides: Option<PyObject>,
-    types: Option<Py<Types>>,
+    overrides: Option<Py<PyAny>>,
+    types: Option<Py<PyAny>>,
     hidden: bool,
     parents: bool,
     ignore: bool,
@@ -56,11 +72,12 @@ pub struct Walk {
     git_exclude: bool,
     require_git: bool,
     ignore_case_insensitive: bool,
-    sort: Option<PyObject>,
+    sort: SortValue,
     same_file_system: bool,
     skip_stdout: bool,
-    filter_entry: Option<PyObject>,
-    onerror: Option<PyObject>,
+    filter_entry: Option<Py<PyAny>>,
+    onerror: Option<Py<PyAny>>,
+    callback_error: CallbackError,
 }
 
 #[pymethods]
@@ -70,6 +87,7 @@ impl Walk {
         signature = (
             *paths,
             max_depth = None,
+            min_depth = None,
             follow_symlinks = false,
             max_filesize = None,
             global_ignore_files = None,
@@ -96,12 +114,13 @@ impl Walk {
         py: Python<'py>,
         paths: &Bound<'py, PyTuple>,
         max_depth: Option<usize>,
+        min_depth: Option<usize>,
         follow_symlinks: bool,
         max_filesize: Option<u64>,
         global_ignore_files: Option<&Bound<'py, PySequence>>,
         custom_ignore_filenames: Option<&Bound<'py, PySequence>>,
-        overrides: Option<&Bound<'py, PyAny>>,
-        types: Option<Py<Types>>,
+        overrides: Option<Bound<'py, PyAny>>,
+        types: Option<Bound<'py, PyAny>>,
         hidden: bool,
         parents: bool,
         ignore: bool,
@@ -113,38 +132,33 @@ impl Walk {
         sort: Option<Bound<'py, PyAny>>,
         same_file_system: bool,
         skip_stdout: bool,
-        filter_entry: Option<PyObject>,
-        onerror: Option<PyObject>,
+        filter_entry: Option<Py<PyAny>>,
+        onerror: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
-        let paths = PyList::new_bound(py, paths);
+        let paths = PyList::new(py, paths)?;
         let global_ignore_files = match global_ignore_files {
             Some(seq) => Some(seq.to_list()?.unbind()),
-            None => Some(PyList::empty_bound(py).unbind()),
+            None => Some(PyList::empty(py).unbind()),
         };
         let custom_ignore_filenames = match custom_ignore_filenames {
             Some(seq) => Some(seq.to_list()?.unbind()),
-            None => Some(PyList::empty_bound(py).unbind()),
+            None => Some(PyList::empty(py).unbind()),
         };
         let sort = match sort {
-            Some(sort) => {
-                if sort.is_truthy()? {
-                    Some(sort)
-                } else {
-                    None
-                }
-            }
-            None => None,
+            Some(sort) => SortValue::new(sort)?,
+            None => SortValue::Bool(false),
         };
         let mut instance = Self {
             state: State::Unopened,
             paths: Some(paths.unbind()),
             max_depth,
+            min_depth,
             follow_symlinks,
             max_filesize,
             global_ignore_files,
             custom_ignore_filenames,
             overrides: None,
-            types,
+            types: None,
             hidden,
             parents,
             ignore,
@@ -153,15 +167,15 @@ impl Walk {
             git_exclude,
             require_git,
             ignore_case_insensitive,
-            sort: sort.map(Bound::unbind),
+            sort,
             same_file_system,
             skip_stdout,
             filter_entry,
             onerror,
+            callback_error: CallbackError::default(),
         };
-        if let Some(overrides) = overrides {
-            instance.set_overrides(py, Some(overrides))?;
-        }
+        instance.set_overrides(overrides)?;
+        instance.set_types(types)?;
         Ok(instance)
     }
 
@@ -208,6 +222,18 @@ impl Walk {
     }
 
     #[getter]
+    fn min_depth(&self) -> Option<usize> {
+        self.min_depth
+    }
+
+    #[setter]
+    fn set_min_depth(&mut self, value: Option<usize>) -> PyResult<()> {
+        self.check_not_started_setter()?;
+        self.min_depth = value;
+        Ok(())
+    }
+
+    #[getter]
     fn follow_symlinks(&self) -> bool {
         self.follow_symlinks
     }
@@ -248,41 +274,36 @@ impl Walk {
     }
 
     #[getter]
-    fn overrides(&self, py: Python<'_>) -> PyObject {
-        self.overrides.to_object(py)
+    fn overrides<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(self.overrides.as_ref().into_pyobject(py)?)
     }
 
     #[setter]
-    fn set_overrides(
-        &mut self,
-        py: Python<'_>,
-        overrides: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<()> {
+    fn set_overrides(&mut self, overrides: Option<Bound<'_, PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.overrides = overrides
-            .map(|overrides| {
-                let types_mod = TYPES_MODULE.get(py).unwrap().bind(py);
-                let overrides_type = types_mod.getattr("Overrides").unwrap();
-                if !overrides.is_instance(&overrides_type)? {
-                    return Err(PyTypeError::new_err(
-                        "overrides must be an Overrides instance",
-                    ));
-                }
-                Ok(overrides.into_py(py))
-            })
-            .transpose()?;
+        if let Some(overrides) = &overrides {
+            check_instance(
+                overrides,
+                "Overrides",
+                "overrides must be an Overrides instance",
+            )?;
+        }
+        self.overrides = overrides.map(Bound::unbind);
         Ok(())
     }
 
     #[getter]
-    fn types(&self, py: Python<'_>) -> PyObject {
-        self.types.to_object(py)
+    fn types<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(self.types.as_ref().into_pyobject(py)?)
     }
 
     #[setter]
-    fn set_types(&mut self, types: Option<Py<Types>>) -> PyResult<()> {
+    fn set_types(&mut self, types: Option<Bound<'_, PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.types = types;
+        if let Some(types) = &types {
+            check_instance(types, "Types", "types must be a Types instance")?;
+        }
+        self.types = types.map(Bound::unbind);
         Ok(())
     }
 
@@ -383,18 +404,14 @@ impl Walk {
     }
 
     #[getter]
-    fn sort(&self, py: Python<'_>) -> PyObject {
-        self.sort.clone().unwrap_or_else(|| false.into_py(py))
+    fn sort(&self) -> &SortValue {
+        &self.sort
     }
 
     #[setter]
-    fn set_sort(&mut self, py: Python<'_>, value: PyObject) -> PyResult<()> {
+    fn set_sort(&mut self, value: Bound<'_, PyAny>) -> PyResult<()> {
         self.check_not_started_setter()?;
-        self.sort = if value.is_truthy(py)? {
-            Some(value)
-        } else {
-            None
-        };
+        self.sort = SortValue::new(value)?;
         Ok(())
     }
 
@@ -423,24 +440,24 @@ impl Walk {
     }
 
     #[getter]
-    fn filter_entry(&self) -> Option<PyObject> {
-        self.filter_entry.clone()
+    fn filter_entry(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.filter_entry.as_ref().map(|f| f.clone_ref(py))
     }
 
     #[setter]
-    fn set_filter_entry(&mut self, value: Option<PyObject>) -> PyResult<()> {
+    fn set_filter_entry(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.filter_entry = value;
         Ok(())
     }
 
     #[getter]
-    fn onerror(&self) -> Option<PyObject> {
-        self.onerror.clone()
+    fn onerror(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.onerror.as_ref().map(|onerror| onerror.clone_ref(py))
     }
 
     #[setter]
-    fn set_onerror(&mut self, value: Option<PyObject>) -> PyResult<()> {
+    fn set_onerror(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
         self.check_not_started_setter()?;
         self.onerror = value;
         Ok(())
@@ -452,7 +469,7 @@ impl Walk {
             State::Opened | State::Started(_) => {
                 return Err(PyRuntimeError::new_err(
                     "Walk context manager is not reentrant",
-                ))
+                ));
             }
             State::Closed => return Err(PyRuntimeError::new_err("Walk is closed")),
         };
@@ -466,11 +483,12 @@ impl Walk {
         self.state = State::Closed;
     }
 
+    #[pyo3(signature = (_exc_type, _exc_val, _exc_tb))]
     fn __exit__(
         &mut self,
-        _exc_type: Option<&Bound<'_, PyType>>,
-        _exc_val: Option<&Bound<'_, PyException>>,
-        _exc_tb: Option<&Bound<'_, PyTraceback>>,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc_val: &Bound<'_, PyAny>,
+        _exc_tb: &Bound<'_, PyAny>,
     ) {
         self.close();
     }
@@ -480,34 +498,62 @@ impl Walk {
     }
 
     fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<DirEntry>> {
-        self.ensure_started(py)?;
-        let walk = match &mut self.state {
-            State::Started(walk) => walk,
-            _ => unreachable!(),
+        if let State::Unopened | State::Opened = self.state {
+            self.state = State::Started(Box::new(self.build(py)?));
+        }
+        let State::Started(walk) = &mut self.state else {
+            // Like other iterators, keep raising StopIteration once closed.
+            return Ok(None);
         };
 
-        while let Some(dent) = py.allow_threads(|| walk.next()) {
-            if let Some(err) = PyErr::take(py) {
+        loop {
+            // Sorting with a Python key that doesn't define a total order can
+            // make Rust's sort panic.
+            let next = py.detach(|| panic::catch_unwind(AssertUnwindSafe(|| walk.next())));
+            let dent = match next {
+                Ok(Some(dent)) => dent,
+                Ok(None) => break,
+                Err(payload) => {
+                    self.state = State::Closed;
+                    return Err(self
+                        .callback_error
+                        .take()
+                        .unwrap_or_else(|| walk_panic_error(payload)));
+                }
+            };
+
+            if let Some(err) = self.callback_error.take() {
                 // Don't pass user-caused errors through onerror, raise directly
                 return Err(err);
             }
 
             match dent {
                 Ok(dent) => {
-                    if let Some(err) = dent.error() {
-                        self.convert_and_call_onerror(py, err.clone())?;
+                    if let (Some(err), Some(onerror)) = (dent.error(), &self.onerror) {
+                        convert_and_call_onerror(onerror.bind(py), err.clone())?;
+                    }
+                    // WalkBuilder::min_depth stops ignore files in shallower
+                    // directories from being read, so filter here instead.
+                    if self
+                        .min_depth
+                        .is_some_and(|min_depth| dent.depth() < min_depth)
+                    {
+                        continue;
                     }
                     return Ok(Some(DirEntry::new(dent, self.follow_symlinks)));
                 }
                 Err(err) => {
-                    if let Some(onerror) = self.onerror.clone() {
-                        convert_and_call_onerror(py, onerror.bind(py), err)?;
+                    if let Some(onerror) = self.onerror.as_ref() {
+                        convert_and_call_onerror(onerror.bind(py), err)?;
                     }
                 }
             }
         }
 
-        if let Some(err) = PyErr::take(py) {
+        // Release resources as soon as iteration finishes, like os.scandir.
+        self.state = State::Closed;
+
+        if let Some(err) = self.callback_error.take() {
             // Don't pass user-caused errors through onerror, raise directly
             return Err(err);
         }
@@ -531,7 +577,7 @@ impl Walk {
         if let Some(types) = &self.types {
             visit.call(types)?;
         }
-        if let Some(sort) = &self.sort {
+        if let SortValue::Callable(sort) = &self.sort {
             visit.call(sort)?;
         }
         if let Some(filter_entry) = &self.filter_entry {
@@ -549,7 +595,7 @@ impl Walk {
         self.custom_ignore_filenames = None;
         self.overrides = None;
         self.types = None;
-        self.sort = None;
+        self.sort = SortValue::Bool(false);
         self.filter_entry = None;
         self.onerror = None;
     }
@@ -572,23 +618,22 @@ impl Walk {
         }
         let paths = fspath_list(paths)?;
 
-        // The ignore crate treats "-" specially and just returns "<stdin>" if you try to walk it.
-        let stdin = Path::new("-");
-
-        for path in &paths {
-            // This is ugly, can we fix this upstream?
-            if path == stdin {
-                return Err(PyTypeError::new_err(
-                    "path cannot be '-', use './-' if you need this.",
-                ));
-            }
+        // The ignore crate walks "-" as stdin, which only makes sense for a CLI.
+        if paths.iter().any(|path| path == "-") {
+            return Err(PyValueError::new_err(
+                "path cannot be '-', use './-' if you need this",
+            ));
         }
 
-        let mut builder = ignore::WalkBuilder::new(&paths[0]);
-
-        for path in paths.iter().skip(1) {
-            builder.add(path);
+        if let (Some(min_depth), Some(max_depth)) = (self.min_depth, self.max_depth)
+            && min_depth > max_depth
+        {
+            return Err(PyValueError::new_err(
+                "min_depth must not be greater than max_depth",
+            ));
         }
+
+        let mut builder = ignore::WalkBuilder::from_iter(&paths);
 
         builder
             .max_depth(self.max_depth)
@@ -621,127 +666,85 @@ impl Walk {
             builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
-        if let Some(filter_entry) = self.filter_entry.clone() {
+        if let Some(filter_entry) = self.filter_entry.as_ref().map(|f| f.clone_ref(py)) {
             let follow_symlinks = self.follow_symlinks;
+            let callback_error = self.callback_error.clone();
             builder.filter_entry(move |dent| {
+                if callback_error.is_set() {
+                    return true;
+                }
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     filter_entry
                         .call1(py, (py_dent,))
                         .and_then(|result| result.is_truthy(py))
                         .unwrap_or_else(|err| {
-                            if !PyErr::occurred(py) {
-                                err.restore(py);
-                            }
-
-                            // Return true so that we reach the __next__ method where we can return
-                            // the error can be raised
+                            callback_error.set(err);
+                            // Keep the entry so the walker returns to __next__ soon.
                             true
                         })
                 })
             });
         }
 
-        if let Some(sort) = self.sort.clone() {
-            if sort.bind(py).is_callable() {
-                builder.sort_by_file_path(move |a, b| {
-                    fn inner(sort_key: &PyObject, a: &Path, b: &Path) -> PyResult<Ordering> {
-                        Python::with_gil(|py| {
-                            let a = sort_key.call1(py, (a.as_os_str(),))?;
-                            let b = sort_key.call1(py, (b.as_os_str(),))?;
-
-                            let ra = a.bind(py);
-                            let rb = b.bind(py);
-
-                            Ok(match ra.gt(rb)? as i8 - ra.lt(rb)? as i8 {
-                                -1 => Ordering::Less,
-                                0 => Ordering::Equal,
-                                1 => Ordering::Greater,
-                                _ => unreachable!(),
-                            })
-                        })
-                    }
-
-                    inner(&sort, a, b).unwrap_or_else(|err| {
-                        Python::with_gil(|py| {
-                            if !PyErr::occurred(py) {
-                                err.restore(py);
-                            }
-                        });
-                        a.cmp(b)
-                    })
-                });
-            } else {
+        match &self.sort {
+            SortValue::Callable(key) => {
+                let comparator = KeyComparator::new(key.clone_ref(py), self.callback_error.clone());
+                builder.sort_by_file_path(move |a, b| comparator.compare(a, b));
+            }
+            SortValue::Bool(true) => {
                 builder.sort_by_file_path(|a, b| a.cmp(b));
             }
+            SortValue::Bool(false) => {}
         }
 
         if let Some(overrides) = &self.overrides {
             let overrides = overrides.bind(py);
             let path: OsString = fspath(&overrides.getattr("path")?)?.extract()?;
             let mut overrides_builder = OverrideBuilder::new(path);
-            for override_ in overrides.iter()? {
+            for override_ in overrides.try_iter()? {
                 let override_ = override_?;
                 let x = override_.get_item(0)?;
                 let glob = &*x.extract::<PyBackedStr>()?;
                 let case_insensitive = override_.get_item(1)?.extract()?;
                 overrides_builder
                     .case_insensitive(case_insensitive)
-                    .map_err(|err| err.into_py_err(py))?;
-                overrides_builder
-                    .add(glob)
-                    .map_err(|err| err.into_py_err(py))?;
+                    .map_err(IgnoreError::from)?;
+                overrides_builder.add(glob).map_err(IgnoreError::from)?;
             }
-            let overrides = overrides_builder
-                .build()
-                .map_err(|err| err.into_py_err(py))?;
+            let overrides = overrides_builder.build().map_err(IgnoreError::from)?;
             builder.overrides(overrides);
         }
 
         if let Some(types) = &self.types {
-            let types = types.borrow(py);
+            let types = types.bind(py);
             let mut types_builder = TypesBuilder::new();
-            for name in types.__iter__(py)?.bind(py) {
-                let name = name?;
-                let globs: Py<PyTuple> = types.__getitem__(py, &name)?.extract()?;
-                for glob in globs.extract::<Vec<PyBackedStr>>(py)? {
-                    types_builder
-                        .add(&*name.extract::<PyBackedStr>()?, &glob)
-                        .map_err(|err| err.into_py_err(py))?;
+            for item in types.call_method0("items")?.try_iter()? {
+                let (name, globs): (PyBackedStr, Vec<PyBackedStr>) = item?.extract()?;
+                for glob in &globs {
+                    types_builder.add(&name, glob).map_err(IgnoreError::from)?;
                 }
             }
-            for selection in &types.selections {
-                match selection {
-                    Selection::Select(name) => {
-                        types_builder.select(name);
-                    }
-                    Selection::Negate(name) => {
-                        types_builder.negate(name);
-                    }
+            let select_type = types_module(py)?.getattr("Select")?;
+            for selection in types.call_method0("selections")?.try_iter()? {
+                let selection = selection?;
+                let name: PyBackedStr = selection.getattr("name")?.extract()?;
+                if selection.is_instance(&select_type)? {
+                    types_builder.select(&name);
+                } else {
+                    types_builder.negate(&name);
                 }
             }
-            let types = types_builder.build().map_err(|err| err.into_py_err(py))?;
+            let types = types_builder.build().map_err(IgnoreError::from)?;
             builder.types(types);
         }
 
         Ok(builder.build())
     }
 
-    fn ensure_started(&mut self, py: Python<'_>) -> PyResult<()> {
-        match &self.state {
-            State::Unopened | State::Opened => {
-                self.state = State::Started(Box::new(self.build(py)?));
-            }
-            State::Closed => return Err(PyRuntimeError::new_err("Walk is closed")),
-            State::Started(_) => (),
-        };
-        debug_assert!(matches!(self.state, State::Started(_)));
-        Ok(())
-    }
-
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {
-        if let Some(onerror) = self.onerror.clone() {
-            convert_and_call_onerror(py, onerror.bind(py), err)?;
+        if let Some(onerror) = self.onerror.as_ref().map(|onerror| onerror.clone_ref(py)) {
+            convert_and_call_onerror(onerror.bind(py), err)?;
         }
         Ok(())
     }
@@ -750,86 +753,87 @@ impl Walk {
 impl Drop for Walk {
     fn drop(&mut self) {
         if matches!(self.state, State::Started(_)) {
-            Python::with_gil(|py| {
-                // SAFETY: We're borrowing PyExc_ResourceWarning so need to incref
-                let resource_warning_type =
-                    unsafe { Bound::from_borrowed_ptr(py, ffi::PyExc_ResourceWarning) };
-
-                // SAFETY: We're borrowing PyExc_Warning so need to incref
-                let warning_type = unsafe { Bound::from_borrowed_ptr(py, ffi::PyExc_Warning) };
-
+            Python::attach(|py| {
                 // Note: Until pyo3 lets us implement tp_finalize, we can't use
                 // PyErr_ResourceWarning, include the repr in the message, or pass the instance to
                 // PyErr_WriteUnraisable for additional context.
-                if let Err(err) =
-                    PyErr::warn_bound(py, &resource_warning_type, "Unclosed Walk iterator", 1)
-                {
-                    if err.matches(py, warning_type) {
-                        err.restore(py);
-                        // SAFETY: NULL is an acceptable pointer when there is no available context.
-                        unsafe { ffi::PyErr_WriteUnraisable(ptr::null_mut()) };
-                    }
+                let category = py.get_type::<PyResourceWarning>();
+                if let Err(err) = PyErr::warn(py, &category, c"Unclosed Walk iterator", 1) {
+                    err.write_unraisable(py, None);
                 }
             });
         }
     }
 }
 
-fn convert_and_call_onerror(
-    py: Python<'_>,
-    onerror: &Bound<'_, PyAny>,
-    err: ignore::Error,
-) -> PyResult<()> {
-    onerror.call1((err.into_py_err(py),)).map(|_| ())
+enum SortValue {
+    Callable(Py<PyAny>),
+    Bool(bool),
+}
+
+impl SortValue {
+    fn new(value: Bound<'_, PyAny>) -> PyResult<Self> {
+        if value.is_instance_of::<PyBool>() {
+            Ok(Self::Bool(value.extract()?))
+        } else if value.is_callable() {
+            Ok(Self::Callable(value.unbind()))
+        } else {
+            Err(PyTypeError::new_err("sort must be bool or Callable"))
+        }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for SortValue {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        match self {
+            Self::Callable(sort) => Ok(sort.into_bound(py)),
+            Self::Bool(sort) => Ok(PyBool::new(py, sort).to_owned().into_any()),
+        }
+    }
+}
+
+impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
+    type Target = PyAny;
+    type Output = Borrowed<'a, 'py, Self::Target>;
+    type Error = std::convert::Infallible;
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        match self {
+            SortValue::Callable(sort) => Ok(sort.bind_borrowed(py)),
+            SortValue::Bool(sort) => Ok(PyBool::new(py, *sort).into_any()),
+        }
+    }
+}
+
+/// Convert a panic from the walker into an exception if it was caused by an
+/// inconsistent sort key, otherwise keep panicking.
+fn walk_panic_error(payload: Box<dyn Any + Send>) -> PyErr {
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str));
+    if message.is_some_and(|message| message.contains("total order")) {
+        return PyValueError::new_err("sort key does not define a consistent order");
+    }
+    panic::resume_unwind(payload)
+}
+
+fn convert_and_call_onerror(onerror: &Bound<'_, PyAny>, err: ignore::Error) -> PyResult<()> {
+    let _ = onerror.call1((PyErr::from(IgnoreError::from(err)),))?;
+    Ok(())
 }
 
 #[pymodule]
 fn _lib(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let mutable_mapping_type = py
-        .import_bound("collections.abc")?
-        .getattr("MutableMapping")?
-        .downcast_into::<PyType>()?;
-
     m.add_class::<Walk>()?;
-    mutable_mapping_type.call_method1("register", (Types::type_object_bound(py),))?;
-    m.add_class::<Types>()?;
     m.add_class::<DirEntry>()?;
+    m.add_function(wrap_pyfunction!(types::default_types, m)?)?;
+    m.add_function(wrap_pyfunction!(types::is_valid_type_name, m)?)?;
 
-    let name: Py<PyString> = "_types".into_py(py);
-    let globals = m.dict().as_ptr();
-
-    let types_mod: Py<PyModule> = unsafe {
-        let mod_ptr = ffi::PyImport_ImportModuleLevelObject(
-            name.as_ptr(),
-            globals,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            1,
-        );
-        Py::from_owned_ptr_or_err(py, mod_ptr)?
-    };
-
-    let _ = TYPES_MODULE.set(py, types_mod);
-
-    let collections_abc_mod = py.import_bound("collections.abc")?;
-
-    let keys_view_type = collections_abc_mod
-        .getattr("KeysView")?
-        .downcast_into::<PyType>()?;
-
-    let items_view_type = collections_abc_mod
-        .getattr("ItemsView")?
-        .downcast_into::<PyType>()?;
-
-    let values_view_type = collections_abc_mod
-        .getattr("ValuesView")?
-        .downcast_into::<PyType>()?;
-
-    let _ = KEYS_VIEW_TYPE.set(py, keys_view_type.unbind());
-    let _ = ITEMS_VIEW_TYPE.set(py, items_view_type.unbind());
-    let _ = VALUES_VIEW_TYPE.set(py, values_view_type.unbind());
-
-    let _ = OS_STAT.set(py, py.import_bound("os")?.getattr("stat")?.into());
+    let _ = OS_STAT.set(py, py.import("os")?.getattr("stat")?.into());
 
     Ok(())
 }

@@ -11,21 +11,27 @@ from uuid import uuid4
 
 import nox
 
+nox.needs_version = ">=2026.4.10"
+
+PYPROJECT = nox.project.load_toml("pyproject.toml")
+PYTHON_VERSIONS = nox.project.python_versions(PYPROJECT)
+
 nox.options.reuse_existing_virtualenvs = True
 nox.options.default_venv_backend = "uv"
 
 
-@nox.session(python="3.13")
+@nox.session(python=PYTHON_VERSIONS)
 def typing(session: nox.Session) -> None:
     session.run_install(
         "uv",
         "sync",
-        "--no-editable",
+        "--no-dev",
+        "--group=test",
         "--group=typing",
-        "--reinstall-package=crabwalk",
-        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
     )
     session.run("mypy", "src/crabwalk", "tests")
+    # Check the stub matches the extension module
+    session.run("python", "-m", "mypy.stubtest", "crabwalk._lib")
 
 
 @nox.session(python="3.13")
@@ -37,7 +43,6 @@ def docs(session: nox.Session) -> None:
         "--no-dev",
         "--group=docstest",
         "--reinstall-package=crabwalk",
-        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
     )
 
     temp_dir = session.create_tmp()
@@ -64,7 +69,7 @@ def docs(session: nox.Session) -> None:
     session.run("doc8", "docs/")
 
 
-@nox.session(python=["3.9", "3.10", "3.11", "3.12", "3.13"])
+@nox.session(python=PYTHON_VERSIONS)
 def tests(session: nox.Session) -> None:
     prof_location = Path(".rust-cov", str(uuid4())).absolute()
     rustflags = session.env.get("RUSTFLAGS", "")
@@ -79,22 +84,13 @@ def tests(session: nox.Session) -> None:
         "uv",
         "sync",
         "--no-editable",
+        "--no-dev",
+        "--group=coverage",
+        "--group=test",
         "--reinstall-package=crabwalk",
-        env={"UV_PROJECT_ENVIRONMENT": session.virtualenv.location},
     )
 
-    if session.posargs:
-        tests = session.posargs
-    else:
-        tests = ["tests/"]
-
-    session.run(
-        "coverage",
-        "run",
-        "-m",
-        "pytest",
-        *tests,
-    )
+    session.run("coverage", "run", "-m", "pytest", *session.posargs)
 
     libs = glob.glob(
         f"{session.virtualenv.location}/lib/**/crabwalk/_lib.*",

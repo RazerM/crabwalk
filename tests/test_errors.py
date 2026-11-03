@@ -1,4 +1,7 @@
+import errno
 import os
+import pickle
+import sys
 from pathlib import Path
 from typing import NoReturn
 
@@ -109,9 +112,14 @@ def test_invalid_definition_error(tmp_path: Path) -> None:
     assert exc_info.value.depth is None
     assert exc_info.value.line is None
     assert exc_info.value.path is None
+    assert isinstance(exc_info.value, ValueError)
+    assert exc_info.value.name == "*bar"
     assert str(exc_info.value) == (
-        "invalid definition (format is type:glob, e.g. html:*.html)"
+        "invalid file type name '*bar': names must only contain letters and "
+        "numbers, and can't be 'all'"
     )
+    copy = pickle.loads(pickle.dumps(exc_info.value))
+    assert copy.name == "*bar"
 
 
 def test_partial_error(tmp_path: Path) -> None:
@@ -124,18 +132,80 @@ def test_partial_error(tmp_path: Path) -> None:
             for entry in walk:
                 print(entry)
 
-    for exc in exc_info.value.errors:
-        assert isinstance(exc, GlobError)
+    first, second = exc_info.value.errors
+    assert isinstance(first, GlobError)
+    assert isinstance(second, GlobError)
+    for exc in [first, second]:
         assert exc.path == str(ignore)
         assert exc.depth is None
 
-    assert str(exc_info.value.errors[0]) == (
+    assert str(first) == (
         f"{ignore}: line 1: error parsing glob '{{': unclosed alternate group; "
         "missing '}' (maybe escape '{' with '[{]'?)"
     )
-    assert exc_info.value.errors[0].line == 1
-    assert str(exc_info.value.errors[1]) == (
+    assert first.line == 1
+    assert str(second) == (
         f"{ignore}: line 2: error parsing glob 'a{{': unclosed alternate group; "
         "missing '}' (maybe escape '{' with '[{]'?)"
     )
-    assert exc_info.value.errors[1].line == 2
+    assert second.line == 2
+
+
+def test_missing_path(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    errors: list[Exception] = []
+
+    with Walk(missing, onerror=errors.append) as walk:
+        assert list(walk) == []
+
+    [error] = errors
+    assert isinstance(error, FileNotFoundError)
+    assert error.errno == errno.ENOENT
+    assert error.filename == str(missing)
+    assert error.depth == 0  # type: ignore[attr-defined]
+
+    # The same message as Python's, which differs on Windows.
+    with pytest.raises(FileNotFoundError) as expected:
+        os.stat(str(missing))
+    assert error.strerror == expected.value.strerror
+    assert str(error) == str(expected.value)
+
+    copy = pickle.loads(pickle.dumps(error))
+    assert type(copy) is FileNotFoundError
+    assert copy.filename == str(missing)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="needs POSIX permissions and a non-root user",
+)
+def test_permission_error(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    errors: list[Exception] = []
+
+    try:
+        with Walk(tmp_path, onerror=errors.append) as walk:
+            assert [entry.path for entry in walk] == [str(tmp_path), str(locked)]
+    finally:
+        locked.chmod(0o700)
+
+    [error] = errors
+    assert isinstance(error, PermissionError)
+    assert error.errno == errno.EACCES
+    assert error.filename == str(locked)
+    assert error.depth == 1  # type: ignore[attr-defined]
+
+
+def test_partial_error_attributes() -> None:
+    error = PartialError([GlobError("bad", glob="{")])
+    assert error.line is None
+    assert error.path is None
+    assert error.depth is None
+
+    copy = pickle.loads(pickle.dumps(error))
+    assert str(copy) == str(error)
+    [glob_error] = copy.errors
+    assert isinstance(glob_error, GlobError)
+    assert glob_error.glob == "{"

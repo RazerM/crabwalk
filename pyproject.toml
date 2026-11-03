@@ -1,40 +1,65 @@
 [build-system]
-requires = ["maturin>=1,<2"]
+requires = ["maturin>=1.9.4,<2"]
 build-backend = "maturin"
 
 [project]
 name = "crabwalk"
 version = "0.1"
-requires-python = ">=3.9"
-license = { text = "MIT" }
-dependencies = []
+description = "Fast recursive directory iterator which supports .gitignore files, file types, and glob filtering."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-    { name = "Frazer McLean", email = "frazer@frazermclean.co.uk" }
+    { name = "Frazer McLean", email = "frazer@frazermclean.co.uk" },
 ]
+keywords = ["gitignore", "glob", "ignore", "walk", "directory", "ripgrep"]
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Free Threading :: 2 - Beta",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: System :: Filesystems",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://crabwalk.readthedocs.io"
+"Source Code" = "https://github.com/RazerM/crabwalk"
 
 [dependency-groups]
 dev = [
     { include-group = "coverage" },
-    "pytest>=8.3.3",
-    "typing-extensions>=4.12.2; python_version<'3.10'",
+    { include-group = "nox" },
+    { include-group = "test" },
+    { include-group = "typing" },
+    "ruff==0.17.3",
+]
+coverage = [
+    "coverage[toml]>=7.17.0",
 ]
 docs = [
-    "furo>=2024.8.6",
-    "myst-parser>=3.0.1",
-    "sphinx>=7.4.7",
+    "furo>=2025.12.19",
+    "myst-parser>=5.1.0",
+    "sphinx>=9.2.0",
 ]
 docstest = [
     { include-group = "docs" },
-    "doc8>=1.1.2",
-]
-typing = [
-    "mypy>=1.13.0",
-]
-coverage = [
-    "coverage[toml]>=7.6.5",
+    "doc8>=2.0.0",
 ]
 nox = [
-    "nox>=2024.10.9",
+    "nox>=2026.4.10",
+]
+test = [
+    "pytest>=9.2.0",
+]
+typing = [
+    "mypy>=2.4.1",
 ]
 
 [tool.maturin]
@@ -44,11 +69,32 @@ manifest-path = "src/rust/Cargo.toml"
 module-name = "crabwalk._lib"
 locked = true
 sdist-generator = "git"
-features = ["pyo3/abi3-py39"]
 
-[tool.isort]
-profile = "black"
-known_first_party = ["crabwalk"]
+[tool.cibuildwheel]
+build-frontend = "build[uv]"
+# Rust doesn't support 32-bit musl and nobody needs 32-bit wheels for 3.11+
+skip = ["*-win32", "*-*linux_i686"]
+test-groups = ["test"]
+test-sources = ["tests", "pyproject.toml"]
+test-command = "pytest"
+
+[tool.cibuildwheel.linux]
+before-all = "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
+environment = { PATH = "$HOME/.cargo/bin:$PATH" }
+
+[tool.cibuildwheel.macos.environment]
+# Rust's minimum macOS target
+MACOSX_DEPLOYMENT_TARGET = "10.12"
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9", "F", # ruff defaults
+    "I", # isort
+    "UP", # pyupgrade
+    "RUF", # ruff
+    "TC005", "TC006", "TC007", "TC010", # flake8-type-checking
+    "EM", # flake8-errmsg
+]
 
 [tool.doc8]
 ignore-path = "docs/_build/"
@@ -71,12 +117,11 @@ warn_unreachable = true
 warn_unused_configs = true
 warn_unused_ignores = true
 
-[tool.pytest.ini_options]
+[tool.pytest]
 markers = [
-    """tree(*children, chdir=False): Configure the tree_path fixture to create \
-    this directory structure.\
-    """,
+    "tree(*children, chdir=False): Configure the tree_path fixture to create this directory structure.",
 ]
+testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
@@ -96,11 +141,20 @@ tests = [
 ]
 
 [tool.uv]
+# Rebuild the extension module when Rust code changes
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/rust/**/*.rs" },
+    { file = "src/rust/Cargo.toml" },
+]
 # Lock latest versions for each Python version
 environments = [
     "python_version>='3.13'",
     "python_version=='3.12'",
     "python_version=='3.11'",
-    "python_version=='3.10'",
-    "python_version=='3.9'",
 ]
+
+[tool.uv.dependency-groups]
+docs = { requires-python = ">=3.13" }

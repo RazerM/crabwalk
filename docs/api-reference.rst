@@ -7,39 +7,43 @@ API Reference
 
     Recursive directory iterator which yields :class:`DirEntry` objects.
 
-    If ``Walk`` is not closed (either by using a ``with`` statement or calling
-    :meth:`close` explicitly) then a :class:`ResourceWarning` will be emitted
-    in its destructor.
+    Like :func:`os.scandir`, ``Walk`` closes itself once iteration is
+    finished. If it is not exhausted or closed (either by using a ``with``
+    statement or calling :meth:`close` explicitly) then a
+    :class:`ResourceWarning` will be emitted in its destructor.
 
     :param paths: Paths to iterate recursively.
-    :type paths: typing.Union[str, os.PathLike[str]]
+    :type paths: str | os.PathLike[str]
     :param max_depth: The maximum depth to recurse.
-    :type max_depth: typing.Optional[int]
+    :type max_depth: int | None
+    :param min_depth: The minimum depth of entries to yield. Shallower
+        directories are still traversed.
+    :type min_depth: int | None
     :param follow_symlinks: Whether to follow symbolic links or not.
     :type follow_symlinks: bool
-    :param max_filesize: Whether to ignore files above the specified limit.
-    :type max_filesize: typing.Optional[int]
+    :param max_filesize: Ignore files larger than this many bytes.
+    :type max_filesize: int | None
     :param global_ignore_files: Paths to global ignore files. These have lower
         precedence than all other sources of ignore rules.
-    :type global_ignore_files: typing.Sequence[typing.Union[str, os.PathLike[str]]]
+    :type global_ignore_files: collections.abc.Sequence[str | os.PathLike[str]]
     :param custom_ignore_filenames: Custom ignore file names. These have higher
         precedence than all other ignore files.
-    :type custom_ignore_filenames: typing.Sequence[str]
+    :type custom_ignore_filenames: collections.abc.Sequence[str]
     :param overrides: Add an override matcher.
-    :type overrides: typing.Optional[Overrides]
+    :type overrides: Overrides | None
     :param types: Add a file type matcher.
-    :type types: typing.Optional[Types]
+    :type types: Types | None
     :param hidden: Enables ignoring hidden files.
-    :type hidden:  bool
+    :type hidden: bool
     :param parents: Enables reading ignore files from parent directories. When
         enabled, ``.gitignore`` files in parent directories of each file path
         given are respected. Otherwise, they are ignored.
-    :type parents:  bool
+    :type parents: bool
     :param ignore: Enables reading ``.ignore`` files.
 
         ``.ignore`` files have the same semantics as gitignore files and are
         supported by search tools such as ripgrep and The Silver Searcher.
-    :type ignore:  bool
+    :type ignore: bool
     :param git_global: Enables reading a global gitignore file, whose path is
         specified in git's ``core.excludesFile`` config option.
 
@@ -47,23 +51,23 @@ API Reference
         does not exist or does not specify ``core.excludesFile``, then
         ``$XDG_CONFIG_HOME/git/ignore`` is read. If ``$XDG_CONFIG_HOME`` is not
         set or is empty, then ``$HOME/.config/git/ignore`` is used instead.
-    :type git_global:  bool
+    :type git_global: bool
     :param git_ignore: Enables reading ``.gitignore`` files.
-    :type git_ignore:  bool
+    :type git_ignore: bool
     :param git_exclude: Enables reading ``.git/info/exclude`` files.
 
         ``.git/info/exclude`` files have match semantics as described in the
         gitignore man page.
-    :type git_exclude:  bool
+    :type git_exclude: bool
     :param require_git: Whether a git repository is required to apply git-related
         ignore rules (global rules, ``.gitignore`` and local exclude rules).
-    :type require_git:  bool
+    :type require_git: bool
     :param ignore_case_insensitive: Process ignore files case insensitively.
     :type ignore_case_insensitive: bool
-    :param sort: May be true to sort entries by file path, or a callable to
-        extract a comparison key based on the file path (like the ``key``
-        argument to :func:`sorted`).
-    :type sort: typing.Union[typing.Callable[[str], SupportsRichComparison], bool]
+    :param sort: May be true to sort the entries in each directory by file
+        path, or a callable to extract a comparison key based on the file path
+        (like the ``key`` argument to :func:`sorted`).
+    :type sort: bool | collections.abc.Callable[[str], typing.Any]
     :param same_file_system: Do not cross file system boundaries.
     :type same_file_system: bool
     :param skip_stdout: Do not yield directory entries that are believed to
@@ -76,12 +80,12 @@ API Reference
         prevents this from happening by skipping over the ``results`` file.
     :type skip_stdout: bool
     :param filter_entry: Yields only entries which satisfy the given predicate
-        and skips descending into directories that do not satify the given
+        and skips descending into directories that do not satisfy the given
         predicate.
-    :type filter_entry: typing.Optional[typing.Callable[[DirEntry], bool]]
+    :type filter_entry: collections.abc.Callable[[DirEntry], bool] | None
     :param onerror: By default, errors are ignored. You may specify a function
         to either log the error or re-raise it.
-    :type onerror: typing.Optional[typing.Callable[[Exception], None]]
+    :type onerror: collections.abc.Callable[[Exception], None] | None
 
     .. method:: disable_standard_filters() -> None
 
@@ -95,7 +99,8 @@ API Reference
 
     .. method:: close() -> None
 
-        Close the iterator and free acquired resources
+        Close the iterator and free acquired resources. Further iteration
+        raises :exc:`StopIteration`.
 
         It is recommended to use a ``with`` statement instead.
 
@@ -202,59 +207,11 @@ API Reference
         from the :class:`Walk` instance which yielded it).
 
 .. autoclass:: Types
+    :members: add, add_defaults, select, negate, selections
 
-    A collection of type definitions with selections and negations.
+.. autoclass:: Select
 
-    ``Types`` implements the :class:`~collections.abc.MutableMapping` interface.
-
-    Typical usage:
-
-    .. code-block:: python
-
-        types = Types()
-        types.add_defaults()
-        types.select("...")
-        types.negate("...")
-
-        with Walk(..., types=types) as walk:
-            ...
-
-    .. note::
-
-        A :class:`Types` instance without any selections or negations won't affect the output of :class:`Walk`.
-
-    .. method:: add(name: str, glob: str) -> None
-
-        Add ``glob`` to type with name ``name``.
-
-        .. doctest::
-
-            >>> types = Types()
-            >>> types.add("py", "*.py")
-            >>> types.add("py", "*.pyi")
-            >>> types["py"]
-            ('*.py', '*.pyi')
-
-    .. method:: add_defaults() -> None
-
-        .. doctest::
-
-            >>> types = Types()
-            >>> types.add_defaults()
-            >>> types["py"]
-            ('*.py',)
-
-    .. method:: select(name: str) -> None
-
-        Select the file type given by ``name``.
-
-        If ``name`` is ``all``, then all file types currently defined are selected.
-
-    .. method:: negate(name: str) -> None
-
-        Ignore the file type given by ``name``.
-
-        If ``name`` is ``all``, then all file types currently defined are ignored.
+.. autoclass:: Negate
 
 .. autoclass:: Override
 
@@ -273,7 +230,7 @@ Exceptions
 
     .. attribute:: path
 
-        A file path is this error is associated with one.
+        A file path if this error is associated with one.
 
     .. attribute:: depth
 
@@ -285,19 +242,47 @@ Exceptions
     An error that occurs when a file loop is detected when traversing symbolic
     links.
 
+    .. attribute:: ancestor
+
+        The ancestor file path in the loop.
+
+    .. attribute:: child
+
+        The child file path in the loop.
+
 .. exception:: GlobError
 
     An error that occurs when trying to parse a glob.
+
+    .. attribute:: glob
+
+        The glob which caused the error, if available.
 
 .. exception:: PartialError
 
     A collection of “soft” errors. These occur when adding an ignore file
     partially succeeded.
 
+    .. attribute:: errors
+
+        The errors, which may include :exc:`OSError` and :exc:`WalkError`
+        instances.
+
 .. exception:: InvalidDefinitionError
 
-    A user specified file type definition could not be parsed.
+    A file type name is invalid. File type names must only contain letters and
+    numbers, and can't be ``all``.
+
+    This is also a :exc:`ValueError`.
+
+    .. attribute:: name
+
+        The invalid file type name.
 
 .. exception:: UnrecognizedFileTypeError
 
     A type selection for a file type that is not defined.
+
+    .. attribute:: name
+
+        The name of the file type.

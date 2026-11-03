@@ -1,5 +1,4 @@
 use std::ffi::OsStr;
-use std::path::Path;
 
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
@@ -12,7 +11,7 @@ pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
     #[pyo3(get)]
     follow_symlinks: bool,
-    stat: Option<PyObject>,
+    stat: Option<Py<PyAny>>,
 }
 
 impl DirEntry {
@@ -30,13 +29,13 @@ impl DirEntry {
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         // Convert path to a PyString and use repr so the output
         // contains surrogate escapes.
-        let path = self.inner.path().as_os_str().to_object(py);
-        Ok(format!("<DirEntry {}>", path.bind(py).repr()?))
+        let path = self.inner.path().as_os_str().into_pyobject(py)?;
+        Ok(format!("<DirEntry {}>", path.repr()?))
     }
 
     #[getter]
-    fn path(&self) -> &Path {
-        self.inner.path()
+    fn path(&self) -> &OsStr {
+        self.inner.path().as_os_str()
     }
 
     #[cfg(unix)]
@@ -77,20 +76,19 @@ impl DirEntry {
         self.inner.depth()
     }
 
-    fn __fspath__(&self) -> &Path {
-        self.inner.path()
+    fn __fspath__(&self) -> &OsStr {
+        self.inner.path().as_os_str()
     }
 
-    fn stat(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn stat(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         match &self.stat {
             Some(stat) => Ok(stat.clone_ref(py)),
             None => {
                 let kwargs = [("follow_symlinks", self.follow_symlinks)];
-                let stat = OS_STAT
-                    .get(py)
-                    .unwrap()
-                    .bind(py)
-                    .call((self.inner.path(),), Some(&kwargs.into_py_dict_bound(py)))?;
+                let stat = OS_STAT.get(py).unwrap().bind(py).call(
+                    (self.inner.path().as_os_str(),),
+                    Some(&kwargs.into_py_dict(py)?),
+                )?;
                 self.stat = Some(stat.clone().into());
                 Ok(stat.into())
             }

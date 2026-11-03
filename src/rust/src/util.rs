@@ -19,11 +19,3 @@ pub fn fspath_list(paths: &Bound<'_, PyList>) -> PyResult<Vec<OsString>> {
         .map(|path| fspath(&path).and_then(|p| p.extract()))
         .collect()
 }
-
-/// Similar to Option but the pyo3 conversion traits are not implemented for it, so we can use
-/// it as a default argument and know that it wasn't passed.
-#[derive(Clone, Debug)]
-pub enum Maybe<T> {
-    Some(T),
-    Missing,
-}

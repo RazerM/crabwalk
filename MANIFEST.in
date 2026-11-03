@@ -1,3 +1,0 @@
-include src/crabwalk/py.typed
-recursive-include src *.pyi
-recursive-include src/rust Cargo.toml Cargo.lock *.rs

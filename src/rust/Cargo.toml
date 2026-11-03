@@ -7,14 +7,8 @@ publish = { workspace = true }
 rust-version = { workspace = true }
 
 [dependencies]
-ignore = "0.4"
-lazy_static = "1.1"
+ignore = "0.4.34"
 pyo3 = { workspace = true }
-regex = "1.1"
-
-[features]
-extension-module = ["pyo3/extension-module"]
-default = ["extension-module"]
 
 [lib]
 name = "crabwalk_rust"
