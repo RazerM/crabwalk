@@ -23,18 +23,25 @@ impl From<Box<ignore::Error>> for IgnoreError {
 
 impl From<IgnoreError> for PyErr {
     fn from(error: IgnoreError) -> Self {
-        Python::attach(|py| match to_exception(py, error.0) {
+        Python::attach(|py| match to_exception(py, error.0, None) {
             Ok(exc) => PyErr::from_value(exc),
             Err(err) => err,
         })
     }
 }
 
-/// Convert an `ignore::Error` into an exception instance.
-fn to_exception(py: Python<'_>, error: ignore::Error) -> PyResult<Bound<'_, PyAny>> {
+/// Convert an `ignore::Error` into an exception instance. `path` is from an
+/// enclosing `ignore::Error::WithPath`.
+fn to_exception(
+    py: Python<'_>,
+    error: ignore::Error,
+    path: Option<PathBuf>,
+) -> PyResult<Bound<'_, PyAny>> {
     let types = types_module(py)?;
     let exc = match error {
-        ignore::Error::Io(err) => os_error(py, err, None)?,
+        // OSError needs the path when it's created, or pickling loses it on
+        // Windows.
+        ignore::Error::Io(err) => return os_error(py, err, path),
         ignore::Error::Glob { err, glob } => {
             let kwargs = [("glob", glob)].into_py_dict(py)?;
             types.getattr("GlobError")?.call((err,), Some(&kwargs))?
@@ -48,33 +55,23 @@ fn to_exception(py: Python<'_>, error: ignore::Error) -> PyResult<Bound<'_, PyAn
             types.getattr("LoopError")?.call((), Some(&kwargs))?
         }
         ignore::Error::WithDepth { err, depth } => {
-            let exc = to_exception(py, *err)?;
+            let exc = to_exception(py, *err, path)?;
             exc.setattr("depth", depth)?;
-            exc
+            return Ok(exc);
         }
         ignore::Error::WithLineNumber { err, line } => {
-            let exc = to_exception(py, *err)?;
+            let exc = to_exception(py, *err, path)?;
             exc.setattr("line", line)?;
-            exc
+            return Ok(exc);
         }
-        ignore::Error::WithPath { err, path } => {
-            if let ignore::Error::Io(err) = *err {
-                return os_error(py, err, Some(path));
-            }
-            let exc = to_exception(py, *err)?;
-            // OSError has its own attribute for the path.
-            let name = if exc.is_instance_of::<PyOSError>() {
-                "filename"
-            } else {
-                "path"
-            };
-            exc.setattr(name, path.into_os_string())?;
-            exc
+        ignore::Error::WithPath { err, path: inner } => {
+            // The outermost path wins.
+            return to_exception(py, *err, path.or(Some(inner)));
         }
         ignore::Error::Partial(errors) => {
             let errors = errors
                 .into_iter()
-                .map(|err| to_exception(py, err))
+                .map(|err| to_exception(py, err, None))
                 .collect::<PyResult<Vec<_>>>()?;
             types.getattr("PartialError")?.call1((errors,))?
         }
@@ -86,6 +83,9 @@ fn to_exception(py: Python<'_>, error: ignore::Error) -> PyResult<Bound<'_, PyAn
                 .call((), Some(&kwargs))?
         }
     };
+    if let Some(path) = path {
+        exc.setattr("path", path.into_os_string())?;
+    }
     Ok(exc)
 }
 
