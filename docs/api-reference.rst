@@ -86,6 +86,16 @@ API Reference
     :param onerror: By default, errors are ignored. You may specify a function
         to either log the error or re-raise it.
     :type onerror: collections.abc.Callable[[Exception], None] | None
+    :param threads: How many threads to walk with. With one thread, entries
+        are yielded in a deterministic order. With more, directories are read
+        in parallel and entries are yielded in an arbitrary order. ``0``
+        chooses the number of threads automatically. Can't be used with
+        ``sort``.
+
+        With more than one thread, ``filter_entry`` is called from several
+        threads. Unless the GIL is disabled (free-threaded Python), that makes
+        it slower than walking with one thread.
+    :type threads: int
 
     .. method:: disable_standard_filters() -> None
 

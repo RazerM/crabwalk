@@ -2,7 +2,9 @@
 
 use std::any::Any;
 use std::ffi::OsString;
-use std::panic::{self, AssertUnwindSafe};
+use std::mem;
+use std::panic;
+use std::sync::Arc;
 
 use ignore::overrides::OverrideBuilder;
 use ignore::types::TypesBuilder;
@@ -11,16 +13,23 @@ use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyList, PySequence, PyTuple};
-use pyo3::{BoundObject, PyTraverseError, PyVisit};
+use pyo3::{BoundObject, PyTraverseError, PyVisit, ffi};
 
-use crate::callback::CallbackError;
+use crate::callback::{CallbackError, SharedCallback, keep_thread_state};
 use crate::direntry::DirEntry;
+use crate::entries::Entries;
 use crate::error::IgnoreError;
 use crate::sort::KeyComparator;
 use crate::util::{fspath, fspath_list};
 
+// Entries are allocated by walker threads and freed by the consumer, which
+// mimalloc handles much better than some system allocators.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod callback;
 mod direntry;
+mod entries;
 mod error;
 mod sort;
 mod types;
@@ -48,7 +57,7 @@ fn check_instance(value: &Bound<'_, PyAny>, type_name: &str, msg: &'static str) 
 enum State {
     Unopened,
     Opened,
-    Started(Box<ignore::Walk>),
+    Started(Box<Entries>),
     Closed,
 }
 
@@ -77,7 +86,11 @@ pub struct Walk {
     skip_stdout: bool,
     filter_entry: Option<Py<PyAny>>,
     onerror: Option<Py<PyAny>>,
+    threads: usize,
     callback_error: CallbackError,
+    // Python callbacks used by the walker, shared with it.
+    shared_filter_entry: Option<Arc<SharedCallback>>,
+    shared_sort: Option<Arc<KeyComparator>>,
 }
 
 #[pymethods]
@@ -106,7 +119,8 @@ impl Walk {
             same_file_system = false,
             skip_stdout = false,
             filter_entry = None,
-            onerror = None
+            onerror = None,
+            threads = 1
         )
     )]
     #[allow(clippy::too_many_arguments)]
@@ -134,6 +148,7 @@ impl Walk {
         skip_stdout: bool,
         filter_entry: Option<Py<PyAny>>,
         onerror: Option<Py<PyAny>>,
+        threads: usize,
     ) -> PyResult<Self> {
         let paths = PyList::new(py, paths)?;
         let global_ignore_files = match global_ignore_files {
@@ -172,7 +187,10 @@ impl Walk {
             skip_stdout,
             filter_entry,
             onerror,
+            threads,
             callback_error: CallbackError::default(),
+            shared_filter_entry: None,
+            shared_sort: None,
         };
         instance.set_overrides(overrides)?;
         instance.set_types(types)?;
@@ -202,11 +220,8 @@ impl Walk {
     }
 
     #[getter]
-    fn paths(&self, py: Python<'_>) -> Py<PyList> {
-        self.paths
-            .as_ref()
-            .map(|paths| paths.clone_ref(py))
-            .unwrap()
+    fn paths(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        not_cleared(&self.paths).map(|paths| paths.clone_ref(py))
     }
 
     #[getter]
@@ -258,19 +273,15 @@ impl Walk {
     }
 
     #[getter]
-    fn global_ignore_files(&self, py: Python<'_>) -> Py<PyList> {
-        self.global_ignore_files
-            .as_ref()
+    fn global_ignore_files(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        not_cleared(&self.global_ignore_files)
             .map(|global_ignore_files| global_ignore_files.clone_ref(py))
-            .unwrap()
     }
 
     #[getter]
-    fn custom_ignore_filenames(&self, py: Python<'_>) -> Py<PyList> {
-        self.custom_ignore_filenames
-            .as_ref()
+    fn custom_ignore_filenames(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        not_cleared(&self.custom_ignore_filenames)
             .map(|custom_ignore_filenames| custom_ignore_filenames.clone_ref(py))
-            .unwrap()
     }
 
     #[getter]
@@ -476,58 +487,84 @@ impl Walk {
         Ok(self_)
     }
 
+    #[getter]
+    fn threads(&self) -> usize {
+        self.threads
+    }
+
+    #[setter]
+    fn set_threads(&mut self, value: usize) -> PyResult<()> {
+        self.check_not_started_setter()?;
+        self.threads = value;
+        Ok(())
+    }
+
     /// Close the iterator and free acquired resources
     ///
     /// It is recommended to use a ``with`` statement instead.
-    fn close(&mut self) {
-        self.state = State::Closed;
+    fn close(&mut self, py: Python<'_>) {
+        if let State::Started(entries) = mem::replace(&mut self.state, State::Closed) {
+            entries.close(py);
+        }
     }
 
     #[pyo3(signature = (_exc_type, _exc_val, _exc_tb))]
     fn __exit__(
         &mut self,
+        py: Python<'_>,
         _exc_type: &Bound<'_, PyAny>,
         _exc_val: &Bound<'_, PyAny>,
         _exc_tb: &Bound<'_, PyAny>,
     ) {
-        self.close();
+        self.close(py);
     }
 
     fn __iter__(self_: PyRef<'_, Self>) -> PyRef<'_, Self> {
         self_
     }
 
-    fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<DirEntry>> {
+    fn __next__<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, DirEntry>>> {
         if let State::Unopened | State::Opened = self.state {
             self.state = State::Started(Box::new(self.build(py)?));
         }
-        let State::Started(walk) = &mut self.state else {
-            // Like other iterators, keep raising StopIteration once closed.
-            return Ok(None);
-        };
 
         loop {
-            // Sorting with a Python key that doesn't define a total order can
-            // make Rust's sort panic.
-            let next = py.detach(|| panic::catch_unwind(AssertUnwindSafe(|| walk.next())));
-            let dent = match next {
-                Ok(Some(dent)) => dent,
-                Ok(None) => break,
-                Err(payload) => {
+            let State::Started(entries) = &mut self.state else {
+                // Like other iterators, keep raising StopIteration once closed.
+                return Ok(None);
+            };
+
+            let Some(result) = entries.pop() else {
+                // Don't pass user-caused errors through onerror, raise directly
+                if let Some(err) = self.callback_error.take(py) {
+                    return Err(err);
+                }
+                if entries.is_finished() {
+                    // Release resources as soon as iteration finishes, like os.scandir.
+                    self.state = State::Closed;
+                    return Ok(None);
+                }
+                if entries.is_forked() {
+                    self.state = State::Closed;
+                    return Err(PyRuntimeError::new_err(
+                        "Walk can't be continued in a process forked while it was walking",
+                    ));
+                }
+                // Sorting with a Python key that doesn't define a total order
+                // can make Rust's sort panic.
+                let callback_error = &self.callback_error;
+                let filled = py.detach(|| entries.fill(callback_error));
+                if let Err(payload) = filled {
                     self.state = State::Closed;
                     return Err(self
                         .callback_error
-                        .take()
+                        .take(py)
                         .unwrap_or_else(|| walk_panic_error(payload)));
                 }
+                continue;
             };
 
-            if let Some(err) = self.callback_error.take() {
-                // Don't pass user-caused errors through onerror, raise directly
-                return Err(err);
-            }
-
-            match dent {
+            match result {
                 Ok(dent) => {
                     if let (Some(err), Some(onerror)) = (dent.error(), &self.onerror) {
                         convert_and_call_onerror(onerror.bind(py), err.clone())?;
@@ -540,7 +577,14 @@ impl Walk {
                     {
                         continue;
                     }
-                    return Ok(Some(DirEntry::new(dent, self.follow_symlinks)));
+                    let entry = Bound::new(py, DirEntry::new(dent, self.follow_symlinks))?;
+                    // pyo3 makes every pyclass support garbage collection, but
+                    // a DirEntry can't be part of a reference cycle until it
+                    // caches a stat result, which tracks it again. Untracking
+                    // it makes lists of entries cheaper for the collector.
+                    // SAFETY: entry is a valid object.
+                    unsafe { ffi::PyObject_GC_UnTrack(entry.as_ptr().cast()) };
+                    return Ok(Some(entry));
                 }
                 Err(err) => {
                     if let Some(onerror) = self.onerror.as_ref() {
@@ -549,16 +593,6 @@ impl Walk {
                 }
             }
         }
-
-        // Release resources as soon as iteration finishes, like os.scandir.
-        self.state = State::Closed;
-
-        if let Some(err) = self.callback_error.take() {
-            // Don't pass user-caused errors through onerror, raise directly
-            return Err(err);
-        }
-
-        Ok(None)
     }
 
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
@@ -586,6 +620,13 @@ impl Walk {
         if let Some(onerror) = &self.onerror {
             visit.call(onerror)?;
         }
+        if let Some(filter_entry) = &self.shared_filter_entry {
+            filter_entry.traverse(&visit)?;
+        }
+        self.callback_error.traverse(&visit)?;
+        if let Some(sort) = &self.shared_sort {
+            sort.traverse(&visit)?;
+        }
         Ok(())
     }
 
@@ -598,6 +639,13 @@ impl Walk {
         self.sort = SortValue::Bool(false);
         self.filter_entry = None;
         self.onerror = None;
+        if let Some(filter_entry) = self.shared_filter_entry.take() {
+            filter_entry.clear();
+        }
+        if let Some(sort) = self.shared_sort.take() {
+            sort.clear();
+        }
+        self.callback_error.clear();
     }
 }
 
@@ -611,8 +659,8 @@ impl Walk {
         Ok(())
     }
 
-    fn build(&mut self, py: Python<'_>) -> PyResult<ignore::Walk> {
-        let paths = self.paths.as_ref().unwrap().bind(py);
+    fn build(&mut self, py: Python<'_>) -> PyResult<Entries> {
+        let paths = not_cleared(&self.paths)?.bind(py);
         if paths.is_empty() {
             return Err(PyTypeError::new_err("Must specify at least one path"));
         }
@@ -650,36 +698,40 @@ impl Walk {
             .same_file_system(self.same_file_system)
             .skip_stdout(self.skip_stdout);
 
-        for path in fspath_list(self.global_ignore_files.as_ref().unwrap().bind(py))? {
+        for path in fspath_list(not_cleared(&self.global_ignore_files)?.bind(py))? {
             if let Some(err) = builder.add_ignore(path) {
                 self.convert_and_call_onerror(py, err)?;
             }
         }
 
-        for path in self
-            .custom_ignore_filenames
-            .as_ref()
-            .unwrap()
-            .bind(py)
-            .iter()
-        {
+        for path in not_cleared(&self.custom_ignore_filenames)?.bind(py).iter() {
             builder.add_custom_ignore_filename(path.extract::<OsString>()?);
         }
 
-        if let Some(filter_entry) = self.filter_entry.as_ref().map(|f| f.clone_ref(py)) {
+        self.shared_filter_entry = self
+            .filter_entry
+            .as_ref()
+            .map(|filter_entry| SharedCallback::new(filter_entry.clone_ref(py)));
+        if let Some(filter_entry) = self.shared_filter_entry.clone() {
             let follow_symlinks = self.follow_symlinks;
             let callback_error = self.callback_error.clone();
             builder.filter_entry(move |dent| {
                 if callback_error.is_set() {
                     return true;
                 }
+                // The parallel walker calls this from its own threads.
+                keep_thread_state();
                 let py_dent = DirEntry::new(dent.clone(), follow_symlinks);
                 Python::attach(|py| {
+                    // The garbage collector may have cleared the Walk.
+                    let Some(filter_entry) = filter_entry.get(py) else {
+                        return true;
+                    };
                     filter_entry
                         .call1(py, (py_dent,))
                         .and_then(|result| result.is_truthy(py))
                         .unwrap_or_else(|err| {
-                            callback_error.set(err);
+                            callback_error.set(py, err);
                             // Keep the entry so the walker returns to __next__ soon.
                             true
                         })
@@ -690,6 +742,7 @@ impl Walk {
         match &self.sort {
             SortValue::Callable(key) => {
                 let comparator = KeyComparator::new(key.clone_ref(py), self.callback_error.clone());
+                self.shared_sort = Some(comparator.clone());
                 builder.sort_by_file_path(move |a, b| comparator.compare(a, b));
             }
             SortValue::Bool(true) => {
@@ -739,7 +792,25 @@ impl Walk {
             builder.types(types);
         }
 
-        Ok(builder.build())
+        match self.threads {
+            1 => {
+                let has_callbacks =
+                    self.filter_entry.is_some() || matches!(self.sort, SortValue::Callable(_));
+                Ok(Entries::sequential(builder.build(), !has_callbacks))
+            }
+            threads => {
+                // The parallel walker doesn't support sorting, which only
+                // makes sense for a deterministic order anyway.
+                if !matches!(self.sort, SortValue::Bool(false)) {
+                    return Err(PyValueError::new_err(
+                        "sort is not supported when using more than one thread",
+                    ));
+                }
+                // 0 chooses automatically.
+                builder.threads(threads);
+                Ok(Entries::parallel(builder.build_parallel())?)
+            }
+        }
     }
 
     fn convert_and_call_onerror(&self, py: Python<'_>, err: ignore::Error) -> PyResult<()> {
@@ -806,6 +877,14 @@ impl<'a, 'py: 'a> IntoPyObject<'py> for &'a SortValue {
             SortValue::Bool(sort) => Ok(PyBool::new(py, *sort).into_any()),
         }
     }
+}
+
+/// A field that is only None after `__clear__`. A cleared object isn't
+/// expected to work normally, but it shouldn't panic either.
+fn not_cleared<T>(field: &Option<T>) -> PyResult<&T> {
+    field
+        .as_ref()
+        .ok_or_else(|| PyRuntimeError::new_err("Walk was cleared by the garbage collector"))
 }
 
 /// Convert a panic from the walker into an exception if it was caused by an

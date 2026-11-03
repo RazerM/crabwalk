@@ -2,7 +2,10 @@ import gc
 import os
 import random
 import re
+import subprocess
+import sys
 import warnings
+import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TypeAlias
@@ -951,3 +954,48 @@ def test_sort_key_inconsistent_order(tmp_path: Path) -> None:
             except ValueError as exc:
                 assert str(exc) == "sort key does not define a consistent order"
                 assert list(walk) == []
+
+
+def test_stat_gc_tracking(tmp_path: Path) -> None:
+    # Entries aren't tracked by the garbage collector until stat() caches a
+    # result, which could reference the entry if os.stat was replaced.
+    code = """
+import gc, os, sys, weakref
+
+class Result:
+    pass
+
+os.stat = lambda *args, **kwargs: Result()
+
+from crabwalk import Walk
+
+with Walk(sys.argv[1]) as walk:
+    entry = next(walk)
+assert not gc.is_tracked(entry)
+result = entry.stat()
+assert entry.stat() is result
+assert gc.is_tracked(entry)
+result.entry = entry
+ref = weakref.ref(result)
+del entry, result
+gc.collect()
+assert ref() is None
+"""
+    subprocess.run([sys.executable, "-c", code, str(tmp_path)], check=True)
+
+
+@pytest.mark.parametrize(
+    "attribute", ["paths", "global_ignore_files", "custom_ignore_filenames"]
+)
+def test_list_cycle_collected(attribute: str) -> None:
+    class Holder:
+        walk: Walk
+
+    holder = Holder()
+    walk = Walk(".")
+    holder.walk = walk
+    getattr(walk, attribute).append(holder)
+    ref = weakref.ref(holder)
+    del walk, holder
+    gc.collect()
+    assert ref() is None

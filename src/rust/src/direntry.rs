@@ -1,17 +1,23 @@
-use std::ffi::OsStr;
+use std::sync::Mutex;
 
 use pyo3::prelude::*;
-use pyo3::types::IntoPyDict;
-use pyo3::{PyTraverseError, PyVisit};
+use pyo3::types::{IntoPyDict, PyString};
+use pyo3::{PyTraverseError, PyVisit, ffi};
 
 use crate::OS_STAT;
+use crate::util::{fsdecode, lock, try_lock};
 
-#[pyclass(module = "crabwalk")]
+// Frozen, which makes creating one for every entry cheaper. Walk.__next__
+// also untracks them from the garbage collector, since they can't be part of
+// a reference cycle until stat() caches a result.
+#[pyclass(module = "crabwalk", frozen)]
 pub(crate) struct DirEntry {
     inner: ignore::DirEntry,
     #[pyo3(get)]
     follow_symlinks: bool,
-    stat: Option<Py<PyAny>>,
+    // The cached stat result. A mutex rather than a once lock so that
+    // __clear__ can drop it.
+    stat: Mutex<Option<Py<PyAny>>>,
 }
 
 impl DirEntry {
@@ -19,7 +25,7 @@ impl DirEntry {
         Self {
             inner: dir_entry,
             follow_symlinks,
-            stat: None,
+            stat: Mutex::new(None),
         }
     }
 }
@@ -29,13 +35,13 @@ impl DirEntry {
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         // Convert path to a PyString and use repr so the output
         // contains surrogate escapes.
-        let path = self.inner.path().as_os_str().into_pyobject(py)?;
+        let path = fsdecode(py, self.inner.path().as_os_str())?;
         Ok(format!("<DirEntry {}>", path.repr()?))
     }
 
     #[getter]
-    fn path(&self) -> &OsStr {
-        self.inner.path().as_os_str()
+    fn path<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
+        fsdecode(py, self.inner.path().as_os_str())
     }
 
     #[cfg(unix)]
@@ -44,8 +50,9 @@ impl DirEntry {
     }
 
     #[cfg(not(unix))]
-    fn inode(&mut self, py: Python<'_>) -> PyResult<u64> {
-        Ok(self.stat(py)?.getattr(py, "st_ino")?.extract(py)?)
+    fn inode(slf: &Bound<'_, Self>) -> PyResult<u64> {
+        let py = slf.py();
+        Ok(Self::stat(slf)?.getattr(py, "st_ino")?.extract(py)?)
     }
 
     fn is_dir(&self) -> bool {
@@ -67,8 +74,8 @@ impl DirEntry {
     }
 
     #[getter]
-    fn name(&self) -> &OsStr {
-        self.inner.file_name()
+    fn name<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
+        fsdecode(py, self.inner.file_name())
     }
 
     #[getter]
@@ -76,33 +83,61 @@ impl DirEntry {
         self.inner.depth()
     }
 
-    fn __fspath__(&self) -> &OsStr {
-        self.inner.path().as_os_str()
+    fn __fspath__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
+        fsdecode(py, self.inner.path().as_os_str())
     }
 
-    fn stat(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        match &self.stat {
-            Some(stat) => Ok(stat.clone_ref(py)),
-            None => {
-                let kwargs = [("follow_symlinks", self.follow_symlinks)];
-                let stat = OS_STAT.get(py).unwrap().bind(py).call(
-                    (self.inner.path().as_os_str(),),
-                    Some(&kwargs.into_py_dict(py)?),
-                )?;
-                self.stat = Some(stat.clone().into());
-                Ok(stat.into())
+    fn stat(slf: &Bound<'_, Self>) -> PyResult<Py<PyAny>> {
+        let py = slf.py();
+        let this = slf.get();
+        if let Some(stat) = &*lock(&this.stat) {
+            return Ok(stat.clone_ref(py));
+        }
+        let kwargs = [("follow_symlinks", this.follow_symlinks)].into_py_dict(py)?;
+        let path = this.inner.path().as_os_str();
+        let stat = OS_STAT
+            .get(py)
+            .unwrap()
+            .bind(py)
+            .call((path,), Some(&kwargs))?
+            .unbind();
+
+        let mut cached = lock(&this.stat);
+        if let Some(existing) = &*cached {
+            // Another thread cached a result first.
+            let existing = existing.clone_ref(py);
+            drop(cached);
+            // Drop outside the lock, since it may run Python code.
+            drop(stat);
+            return Ok(existing);
+        }
+        *cached = Some(stat.clone_ref(py));
+        // os.stat may have been replaced to return anything, so the entry
+        // could now be part of a cycle. Only one thread can get here before
+        // the entry is tracked, so it can't be tracked twice, which is a fatal
+        // error.
+        // SAFETY: slf is a valid object of a type that supports GC, and its
+        // traverse function is valid.
+        unsafe {
+            if ffi::PyObject_GC_IsTracked(slf.as_ptr()) == 0 {
+                ffi::PyObject_GC_Track(slf.as_ptr().cast());
             }
         }
+        Ok(stat)
     }
 
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        if let Some(stat) = &self.stat {
+        if let Some(stat) = try_lock(&self.stat)
+            && let Some(stat) = &*stat
+        {
             visit.call(stat)?;
         }
         Ok(())
     }
 
-    fn __clear__(&mut self) {
-        self.stat = None;
+    fn __clear__(&self) {
+        let stat = lock(&self.stat).take();
+        // Drop outside the lock, since it may run Python code.
+        drop(stat);
     }
 }

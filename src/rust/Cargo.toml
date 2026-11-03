@@ -9,6 +9,12 @@ rust-version = { workspace = true }
 [dependencies]
 ignore = "0.4.34"
 pyo3 = { workspace = true }
+mimalloc = { version = "0.1", default-features = false }
+
+# Python loads the extension with dlopen, which on musl needs mimalloc's
+# local-dynamic TLS model, like mimalloc's own CMake build uses.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { version = "0.1", default-features = false, features = ["local_dynamic_tls"] }
 
 [lib]
 name = "crabwalk_rust"

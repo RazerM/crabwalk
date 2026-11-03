@@ -46,6 +46,26 @@ with Walk(".", overrides=overrides) as walk:
         print(entry.path)
 ```
 
+## Performance
+
+{class}`Walk` reads directories in Rust, and larger walks continue in a
+background thread while you process entries. It is usually faster than
+{func}`os.walk` even with the standard filters disabled.
+
+To walk faster still, read directories in parallel with the `threads` argument.
+Entries are then yielded in an arbitrary order:
+
+```python
+with Walk(".", threads=0) as walk:  # 0 picks the number of threads
+    for entry in walk:
+        print(entry.path)
+```
+
+{class}`Overrides` and {class}`Types` are matched in Rust, so they are much
+faster than filtering with a `filter_entry` function, which is called for every
+entry. This is especially true when walking with more than one thread, unless
+the GIL is disabled (free-threaded Python).
+
 ## Error Handling
 
 Like {func}`os.walk`, errors are ignored by default. You must set an `onerror`
